@@ -219,7 +219,7 @@ caseTransform xform = mapM go
         go (Emph xs)        = Emph <$> caseTransform xform xs
         go (Strong xs)      = Strong <$> caseTransform xform xs
         go (Link xs t)      = Link <$> caseTransform xform xs <*> pure t
-        go (Image xs t)     = Link <$> caseTransform xform xs <*> pure t
+        go (Image _attr xs t)     = Link <$> caseTransform xform xs <*> pure t
         go (Span attr xs)   = Span attr <$> caseTransform xform xs
         go x = return x
 

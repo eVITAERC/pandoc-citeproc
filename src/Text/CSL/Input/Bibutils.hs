@@ -77,6 +77,7 @@ data BibFormat
     | Isi
     | Medline
     | Copac
+    | Mods
 #endif
 
 readBiblioString :: BibFormat -> String -> IO [Reference]
@@ -92,6 +93,7 @@ readBiblioString b s
     | Isi       <- b = go isi_in
     | Medline   <- b = go medline_in
     | Copac     <- b = go copac_in
+    | Mods      <- b = go mods_in
 #endif
     | otherwise      = error "in readBiblioString"
 #ifdef USE_BIBUTILS
@@ -151,7 +153,14 @@ convertRefs :: Maybe MetaValue -> Either String [Reference]
 convertRefs Nothing = Right []
 convertRefs (Just v) =
   case fromJSON (metaValueToJSON v) of
-       Data.Aeson.Error s   -> Left s
+       Data.Aeson.Error s   ->
+         -- check for empty string and treat it as empty list:
+         -- ---
+         -- references:
+         -- ...
+         case fromJSON (metaValueToJSON v) of
+               Success ""   -> Right []
+               _            -> Left s
        Success x            -> Right x
 
 metaValueToJSON :: MetaValue -> Value

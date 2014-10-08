@@ -1,7 +1,7 @@
 module Main where
 import Text.CSL.Input.Bibutils (readBiblioString, BibFormat(..))
-import Text.CSL.Style (Formatted(..))
-import Text.CSL.Reference (Reference(refId), Literal(..), Agent(..))
+import Text.CSL.Style (Formatted(..), Agent(..))
+import Text.CSL.Reference (Reference(refId), Literal(..))
 import Data.Generics ( everywhere, mkT )
 import Data.List (group, sort)
 import Data.Char (chr, toLower)
@@ -84,6 +84,7 @@ readFormat = go . map toLower
         go "medline"  = Just Medline
         go "copac"    = Just Copac
         go "json"     = Just Json
+        go "mods"     = Just Mods
         go _          = Nothing
 
 
@@ -96,7 +97,7 @@ doCites doc = do
 
 findWarnings :: Inline -> [String]
 findWarnings (Span (_,["citeproc-not-found"],[("data-reference-id",ref)]) _) =
-  ["pandoc-citeproc: reference " ++ ref ++ " not found"]
+  ["pandoc-citeproc: reference " ++ ref ++ " not found" | ref /= "*"]
 findWarnings (Span (_,["citeproc-no-output"],_) _) =
   ["pandoc-citeproc: reference with no printed form"]
 findWarnings _ = []
@@ -137,6 +138,7 @@ compressName ag = Agent{
   , literal         = literal ag
   , nameSuffix      = mempty
   , commaSuffix     = False
+  , parseNames      = True
   }
   where
   spcat (Formatted []) y = y

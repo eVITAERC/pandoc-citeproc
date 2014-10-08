@@ -16,16 +16,39 @@
 --
 -----------------------------------------------------------------------------
 
-module Text.CSL.Reference where
+module Text.CSL.Reference ( Literal(..)
+                          , Value(..)
+                          , ReferenceMap
+                          , mkRefMap
+                          , formatField
+                          , fromValue
+                          , isValueSet
+                          , Empty(..)
+                          , RefDate(..)
+                          , handleLiteral
+                          , toDatePart
+                          , setCirca
+                          , mkRefDate
+                          , RefType(..)
+                          , CNum(..)
+                          , Reference(..)
+                          , emptyReference
+                          , numericVars
+                          , getReference
+                          , processCites
+                          , setPageFirst
+                          , setNearNote
+                          )
+where
 
-import Data.List  ( elemIndex, isPrefixOf, intercalate )
+import Data.List  ( elemIndex, intercalate )
+import Data.List.Split ( splitWhen )
 import Data.Maybe ( fromMaybe             )
 import Data.Generics hiding (Generic)
 import GHC.Generics (Generic)
 import Data.Monoid
 import Data.Aeson hiding (Value)
-import qualified Data.Aeson as Aeson
-import Data.Aeson.Types (Parser, Pair)
+import Data.Aeson.Types (Parser)
 import Control.Applicative ((<$>), (<*>), (<|>), pure)
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -33,8 +56,7 @@ import Data.Char (toLower, isUpper, isLower, isDigit)
 import Text.CSL.Style hiding (Number)
 import Text.CSL.Util (parseString, parseInt, parseBool, safeRead, readNum,
                       inlinesToString, capitalize, camelize)
-import Text.Pandoc (Inline(Str,Space))
-import Data.List.Split (wordsBy)
+import Text.Pandoc (Inline(Str))
 import Data.String
 
 newtype Literal = Literal { unLiteral :: String }
@@ -86,47 +108,6 @@ isValueSet val
 
 data Empty = Empty deriving ( Typeable, Data, Generic )
 
-data Agent
-    = Agent { givenName       :: [Formatted]
-            , droppingPart    ::  Formatted
-            , nonDroppingPart ::  Formatted
-            , familyName      ::  Formatted
-            , nameSuffix      ::  Formatted
-            , literal         ::  Formatted
-            , commaSuffix     ::  Bool
-            }
-      deriving ( Show, Read, Eq, Typeable, Data, Generic )
-
-instance FromJSON Agent where
-  parseJSON (Object v) = Agent <$>
-              (v .: "given" <|> ((map Formatted . wordsBy (== Space) . unFormatted) <$> v .: "given") <|> pure []) <*>
-              v .:?  "dropping-particle" .!= mempty <*>
-              v .:? "non-dropping-particle" .!= mempty <*>
-              v .:? "family" .!= mempty <*>
-              v .:? "suffix" .!= mempty <*>
-              v .:? "literal" .!= mempty <*>
-              v .:? "comma-suffix" .!= False
-  parseJSON _ = fail "Could not parse Agent"
-
-instance ToJSON Agent where
-  toJSON agent = object' $ [
-      "given" .= Formatted (intercalate [Space] $ map unFormatted
-                                                $ givenName agent)
-    , "dropping-particle" .= droppingPart agent
-    , "non-dropping-particle" .= nonDroppingPart agent
-    , "family" .= familyName agent
-    , "suffix" .= nameSuffix agent
-    , "literal" .= literal agent
-    ] ++ ["comma-suffix" .= commaSuffix agent | nameSuffix agent /= mempty]
-
-instance FromJSON [Agent] where
-  parseJSON (Array xs) = mapM parseJSON $ V.toList xs
-  parseJSON (Object v) = (:[]) `fmap` parseJSON (Object v)
-  parseJSON _ = fail "Could not parse [Agent]"
-
--- instance ToJSON [Agent] where
---  toJSON xs  = Array (V.fromList $ map toJSON xs)
-
 data RefDate =
     RefDate { year   :: Literal
             , month  :: Literal
@@ -152,7 +133,7 @@ instance FromJSON RefDate where
               v .:? "month" .!= "" <*>
               v .:? "season" .!= "" <*>
               v .:? "day" .!= "" <*>
-              v .:? "other" .!= "" <*>
+              v .:? "literal" .!= "" <*>
               ((v .: "circa" >>= parseBool) <|> pure False)
   parseJSON _ = fail "Could not parse RefDate"
 
@@ -175,8 +156,21 @@ instance FromJSON [RefDate] where
     case dateParts of
          Just (Array xs) -> mapM (fmap (setCirca circa') . parseJSON)
                             $ V.toList xs
-         _               -> (:[]) `fmap` parseJSON (Object v)
+         _               -> handleLiteral <$> parseJSON (Object v)
   parseJSON x          = parseJSON x >>= mkRefDate
+
+-- Zotero doesn't properly support date ranges, so a common
+-- workaround is 2005_2007; support this as date range:
+handleLiteral :: RefDate -> [RefDate]
+handleLiteral d@(RefDate (Literal "") (Literal "") (Literal "")
+                         (Literal "") (Literal xs) b)
+  = case splitWhen (=='_') xs of
+         [x,y] | all isDigit x && all isDigit y &&
+                 not (null x) && not (null y) ->
+                 [RefDate (Literal x) mempty mempty mempty mempty b,
+                  RefDate (Literal y) mempty mempty mempty mempty b]
+         _ -> [d]
+handleLiteral d = [d]
 
 toDatePart :: RefDate -> [Int]
 toDatePart refdate =
@@ -363,7 +357,7 @@ data Reference =
     } deriving ( Eq, Show, Read, Typeable, Data, Generic )
 
 instance FromJSON Reference where
-  parseJSON (Object v) = Reference <$>
+  parseJSON (Object v) = addPageFirst <$> (Reference <$>
        v .:? "id" .!= "" <*>
        v .:? "type" .!= NoType <*>
        v .:? "author" .!= [] <*>
@@ -438,7 +432,16 @@ instance FromJSON Reference where
        v .:? "language" .!= "" <*>
        v .:? "citation-number" .!= CNum 0 <*>
        ((v .: "first-reference-note-number" >>= parseInt) <|> return 1) <*>
-       v .:? "citation-label" .!= ""
+       v .:? "citation-label" .!= "")
+    where takeFirstNum (Formatted (Str xs : _)) =
+            case takeWhile isDigit xs of
+                   []   -> mempty
+                   ds   -> Formatted [Str ds]
+          takeFirstNum x = x
+          addPageFirst ref = if pageFirst ref == mempty && page ref /= mempty
+                                then ref{ pageFirst =
+                                            takeFirstNum (page ref) }
+                                else ref
   parseJSON _ = fail "Could not parse Reference"
 
 instance ToJSON Reference where
@@ -485,7 +488,7 @@ instance ToJSON Reference where
     , "event" .= event ref
     , "event-place" .= eventPlace ref
     , "page" .= page ref
-    , "page-first" .= pageFirst ref
+    , "page-first" .= (if page ref == mempty then pageFirst ref else mempty)
     , "number-of-pages" .= numberOfPages ref
     , "version" .= version ref
     , "volume" .= volume ref
@@ -608,28 +611,6 @@ numericVars :: [String]
 numericVars = [ "edition", "volume", "number-of-volumes", "number", "issue", "citation-number"
               , "chapter-number", "collection-number", "number-of-pages"]
 
-parseLocator :: String -> (String, String)
-parseLocator s
-    | "b"    `isPrefixOf` formatField s = mk "book"
-    | "ch"   `isPrefixOf` formatField s = mk "chapter"
-    | "co"   `isPrefixOf` formatField s = mk "column"
-    | "fi"   `isPrefixOf` formatField s = mk "figure"
-    | "fo"   `isPrefixOf` formatField s = mk "folio"
-    | "i"    `isPrefixOf` formatField s = mk "issue"
-    | "l"    `isPrefixOf` formatField s = mk "line"
-    | "n"    `isPrefixOf` formatField s = mk "note"
-    | "o"    `isPrefixOf` formatField s = mk "opus"
-    | "para" `isPrefixOf` formatField s = mk "paragraph"
-    | "part" `isPrefixOf` formatField s = mk "part"
-    | "p"    `isPrefixOf` formatField s = mk "page"
-    | "sec"  `isPrefixOf` formatField s = mk "section"
-    | "sub"  `isPrefixOf` formatField s = mk "sub verbo"
-    | "ve"   `isPrefixOf` formatField s = mk "verse"
-    | "v"    `isPrefixOf` formatField s = mk "volume"
-    | otherwise                         =    ([], [])
-    where
-      mk c = if null s then ([], []) else (,) c . unwords . tail . words $ s
-
 getReference :: [Reference] -> Cite -> Maybe Reference
 getReference  r c
     = case citeId c `elemIndex` map (unLiteral . refId) r of
@@ -654,22 +635,22 @@ processCites rs cs
 
       procCs a [] = (a,[])
       procCs a (c:xs)
-          | isIbidC, isLocSet = go "ibid-with-locator-c"
           | isIbid,  isLocSet = go "ibid-with-locator"
-          | isIbidC           = go "ibid-c"
           | isIbid            = go "ibid"
           | isElem            = go "subsequent"
           | otherwise         = go "first"
           where
-            go s = let addCite    = if last a /= [] then init a ++ [last a ++ [c]] else init a ++ [[c]]
+            go s = let addCite    = init a ++ [last a ++ [c]]
                        (a', rest) = procCs addCite xs
                    in  (a', (c { citePosition = s}, getRef c) : rest)
             isElem   = citeId c `elem` map citeId (concat a)
-            -- Ibid in same citation
-            isIbid   = last a /= [] && citeId c == citeId (last $ last a)
-            -- Ibid in different citations (must be capitalized)
-            isIbidC  = init a /= [] && length (last $ init a) == 1 &&
-                       last a == [] && citeId c == citeId (head . last $ init a)
+            isIbid   = case reverse (last a) of
+                            []    -> case reverse (init a) of
+                                          []     -> False
+                                          (zs:_) -> not (null zs) &&
+                                                    all (== citeId c)
+                                                        (map citeId zs)
+                            (x:_) -> citeId c == citeId x
             isLocSet = citeLocator c /= ""
 
 setPageFirst :: Reference -> Reference
@@ -699,12 +680,3 @@ setNearNote s cs
                                   citeNoteNumber x /= "0" &&
                                   readNum (citeNoteNumber c) - readNum (citeNoteNumber x) <= near_note
                            _   -> False
-
-object' :: [Pair] -> Aeson.Value
-object' = object . filter (not . isempty)
-  where isempty (_, Array v)  = V.null v
-        isempty (_, String t) = T.null t
-        isempty ("first-reference-note-number", Aeson.Number n) = n == 0
-        isempty ("citation-number", Aeson.Number n) = n == 0
-        isempty (_, _)        = False
-

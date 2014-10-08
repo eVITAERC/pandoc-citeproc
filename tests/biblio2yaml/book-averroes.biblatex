@@ -70,10 +70,10 @@ references:
   - given: Kalman P.
     family: Bland
   publisher: Jewish Theological Seminary of America
-  collection-title: ! 'Moreshet: Studies in Jewish History, Literature and Thought'
+  collection-title: ! '<span class="nocase">Moreshet: Studies in Jewish History, Literature and Thought</span>'
   type: book
   publisher-place: New York
-  collection-number: 7
+  collection-number: '7'
   language: en-US
 - title-short: "Über die Möglichkeit der Conjunktion"
   annote: An annotated edition. Note the concatenation of the editor, translator,

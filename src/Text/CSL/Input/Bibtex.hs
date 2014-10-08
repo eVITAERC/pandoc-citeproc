@@ -27,8 +27,9 @@ import Control.Monad
 import Control.Monad.RWS
 import System.Environment (getEnvironment)
 import Text.CSL.Reference
-import Text.CSL.Style (Formatted(..))
+import Text.CSL.Style (Formatted(..), Locale(..), CslTerm(..), Agent(..))
 import Text.CSL.Util (trim, onBlocks, unTitlecase, protectCase, splitStrWhen)
+import Text.CSL.Parser (parseLocale)
 import qualified Text.Pandoc.Walk as Walk
 import qualified Text.Pandoc.UTF8 as UTF8
 
@@ -86,7 +87,8 @@ readBibtexInputString isBibtex bibstring = do
   let items = case runParser (bibEntries <* eof) [] "stdin" bibstring of
                    Left err -> error (show err)
                    Right xs -> resolveCrossRefs isBibtex xs
-  return $ mapMaybe (itemToReference lang isBibtex) items
+  locale <- parseLocale (langToLocale lang)
+  return $ mapMaybe (itemToReference lang locale isBibtex) items
 
 type BibParser = Parsec [Char] [(String, String)]
 
@@ -142,9 +144,10 @@ braced s = "{" ++ s ++ "}"
 inQuotes :: BibParser String
 inQuotes = do
   char '"'
-  concat <$> manyTill (try (string "\\\"")
-                     <|> many1 (noneOf "\"\\")
-                     <|> count 1 anyChar) (char '"')
+  concat <$> manyTill (  many1 (noneOf "\"\\{")
+                     <|> (char '\\' >> (\c -> ['\\',c]) <$> anyChar)
+                     <|> braced <$> inBraces
+                      ) (char '"')
 
 fieldName :: BibParser String
 fieldName = (map toLower) <$> many1 (letter <|> digit <|> oneOf "-_")
@@ -310,6 +313,9 @@ bookTrans z =
 
 data Lang = Lang String String  -- e.g. "en" "US"
 
+langToLocale :: Lang -> String
+langToLocale (Lang x y) = x ++ ('-':y)
+
 resolveKey :: Lang -> Formatted -> Formatted
 resolveKey lang (Formatted ils) = Formatted (Walk.walk go ils)
   where go (Str s) = Str $ resolveKey' lang s
@@ -317,7 +323,7 @@ resolveKey lang (Formatted ils) = Formatted (Walk.walk go ils)
 
 resolveKey' :: Lang -> String -> String
 resolveKey' (Lang "en" "US") k =
-  case k of
+  case map toLower k of
        "inpreparation" -> "in preparation"
        "submitted"     -> "submitted"
        "forthcoming"   -> "forthcoming"
@@ -531,6 +537,7 @@ toAuthor _ [Str "others"] = return $
           , nameSuffix      = mempty
           , literal         = Formatted [Str "others"]
           , commaSuffix     = False
+          , parseNames      = True
           }
 toAuthor _ [Span ("",[],[]) ils] =
   return $ -- corporate author
@@ -541,13 +548,21 @@ toAuthor _ [Span ("",[],[]) ils] =
           , nameSuffix      = mempty
           , literal         = Formatted ils
           , commaSuffix     = False
+          , parseNames      = True
           }
 -- First von Last
 -- von Last, First
 -- von Last, Jr ,First
+-- NOTE: biblatex and bibtex differ on:
+-- Drummond de Andrade, Carlos
+-- bibtex takes "Drummond de" as the von;
+-- biblatex takes the whole as a last name.
+-- See https://github.com/plk/biblatex/issues/236
+-- Here we implement the more sensible biblatex behavior.
 toAuthor opts ils = do
   let useprefix = optionSet "useprefix" opts
   let usecomma  = optionSet "juniorcomma" opts
+  let bibtex    = optionSet "bibtex" opts
   let words' = wordsBy (\x -> x == Space || x == Str "\160")
   let commaParts = map words' $ splitWhen (== Str ",")
                               $ splitStrWhen (\c -> c == ',' || c == '\160') ils
@@ -565,10 +580,15 @@ toAuthor opts ils = do
                [vl,f]     -> (f, vl, [])
                (vl:j:f:_) -> (f, vl, j )
                []         -> ([], [], [])
-  let (rlast, rvon) = span isCapitalized $ reverse vonlast
-  let (von, lastname) = case (reverse rvon, reverse rlast) of
-                             (ws@(_:_),[]) -> (init ws, [last ws])
-                             (ws, vs)      -> (ws, vs)
+
+  let (von, lastname) =
+         if bibtex
+            then case span isCapitalized $ reverse vonlast of
+                        ([],(w:ws))    -> (reverse ws, [w])
+                        (vs, ws)       -> (reverse ws, reverse vs)
+            else case span (not . isCapitalized) vonlast of
+                        (vs@(_:_), []) -> (init vs, [last vs])
+                        (vs, ws)       -> (vs, ws)
   let prefix = Formatted $ intercalate [Space] von
   let family = Formatted $ intercalate [Space] lastname
   let suffix = Formatted $ intercalate [Space] jr
@@ -581,6 +601,7 @@ toAuthor opts ils = do
           , nameSuffix      = suffix
           , literal         = mempty
           , commaSuffix     = usecomma
+          , parseNames      = True
           }
 
 isCapitalized :: [Inline] -> Bool
@@ -698,8 +719,18 @@ parseOptions = map breakOpt . splitWhen (==',')
                           (w,v) -> (map toLower $ trim w,
                                     map toLower $ trim $ drop 1 v)
 
-itemToReference :: Lang -> Bool -> Item -> Maybe Reference
-itemToReference lang bibtex = bib $ do
+ordinalize :: Locale -> String -> String
+ordinalize locale n =
+  case [termSingular c | c <- terms, cslTerm c == ("ordinal-" ++ pad0 n)] ++
+       [termSingular c | c <- terms, cslTerm c == "ordinal"] of
+       (suff:_) -> n ++ suff
+       []       -> n
+    where pad0 [c] = ['0',c]
+          pad0 s   = s
+          terms = localeTerms locale
+
+itemToReference :: Lang -> Locale -> Bool -> Item -> Maybe Reference
+itemToReference lang locale bibtex = bib $ do
   modify $ \st -> st{ localeLanguage = lang,
                       untitlecase = case lang of
                                          Lang "en" _ -> True
@@ -708,8 +739,12 @@ itemToReference lang bibtex = bib $ do
   et <- asks entryType
   guard $ et /= "xdata"
   opts <- (parseOptions <$> getRawField "options") <|> return []
-  let getAuthorList' = getAuthorList opts
+  let getAuthorList' = getAuthorList
+         (("bibtex", map toLower $ show bibtex):opts)
   st <- getRawField "entrysubtype" <|> return mempty
+  isEvent <- (True <$ (getRawField "eventdate"
+                     <|> getRawField "eventtitle"
+                     <|> getRawField "venue")) <|> return False
   let (reftype, refgenre) = case et of
        "article"
          | st == "magazine"  -> (ArticleMagazine,mempty)
@@ -717,12 +752,12 @@ itemToReference lang bibtex = bib $ do
          | otherwise         -> (ArticleJournal,mempty)
        "book"            -> (Book,mempty)
        "booklet"         -> (Pamphlet,mempty)
-       "bookinbook"      -> (Book,mempty)
+       "bookinbook"      -> (Chapter,mempty)
        "collection"      -> (Book,mempty)
        "electronic"      -> (Webpage,mempty)
        "inbook"          -> (Chapter,mempty)
        "incollection"    -> (Chapter,mempty)
-       "inreference "    -> (Chapter,mempty)
+       "inreference"     -> (EntryEncyclopedia,mempty)
        "inproceedings"   -> (PaperConference,mempty)
        "manual"          -> (Book,mempty)
        "mastersthesis"   -> (Thesis, Formatted [Str $ resolveKey' lang "mathesis"])
@@ -749,7 +784,7 @@ itemToReference lang bibtex = bib $ do
          | otherwise         -> (ArticleJournal,mempty)
        "techreport"      -> (Report,mempty)
        "thesis"          -> (Thesis,mempty)
-       "unpublished"     -> (Manuscript,mempty)
+       "unpublished"     -> (if isEvent then Speech else Manuscript,mempty)
        "www"             -> (Webpage,mempty)
        -- biblatex, "unsupporEd"
        "artwork"         -> (Graphic,mempty)
@@ -865,7 +900,8 @@ itemToReference lang bibtex = bib $ do
                         <|> return mempty
   -- change numerical series title to e.g. 'series 3'
   let fixSeriesTitle (Formatted [Str xs]) | all isDigit xs =
-         Formatted [Span ("",["nodecor"],[]) [Str (resolveKey' lang "series"), Space, Str xs]]
+         Formatted [Str (ordinalize locale xs),
+                    Space, Str (resolveKey' lang "ser.")]
       fixSeriesTitle x = x
   seriesTitle' <- (fixSeriesTitle . resolveKey lang) <$>
                       getTitle "series" <|> return mempty
@@ -976,6 +1012,12 @@ itemToReference lang bibtex = bib $ do
   let convertEnDash (Str s) = Str (map (\c -> if c == '–' then '-' else c) s)
       convertEnDash x       = x
 
+  let takeDigits (Str xs : _) =
+         case takeWhile isDigit xs of
+              []               -> []
+              ds               -> [Str ds]
+      takeDigits x             = x
+
   return $ emptyReference
          { refId               = Literal id'
          , refType             = reftype
@@ -1008,14 +1050,7 @@ itemToReference lang bibtex = bib $ do
                                       concatWith ':' [ containerTitle'
                                                      , containerSubtitle']
                                     , containerTitleAddon' ]
-                                   `mappend`
-                                   if isArticle && seriesTitle' /= mempty
-                                      then if containerTitle' == mempty
-                                              then seriesTitle'
-                                              else (Formatted [Str ",",Space])
-                                                    `mappend` seriesTitle'
-                                      else mempty
-         , collectionTitle     = if isArticle then mempty else seriesTitle'
+         , collectionTitle     = seriesTitle'
          , volumeTitle         = concatWith '.' [
                                       concatWith ':' [ volumeTitle'
                                                      , volumeSubtitle']
@@ -1032,7 +1067,7 @@ itemToReference lang bibtex = bib $ do
          , eventPlace          = venue'
          , page                = Formatted $
                                  Walk.walk convertEnDash $ unFormatted pages'
-         -- , pageFirst           = undefined -- :: String
+         , pageFirst           = Formatted $ takeDigits $ unFormatted pages'
          , numberOfPages       = pagetotal'
          , version             = version'
          , volume              = Formatted $ intercalate [Str "."]

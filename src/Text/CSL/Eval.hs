@@ -38,7 +38,7 @@ import Text.CSL.Eval.Names
 import Text.CSL.Output.Plain
 import Text.CSL.Reference
 import Text.CSL.Style hiding (Any)
-import Text.CSL.Util ( readNum, last', proc, procM, proc', query, betterThan )
+import Text.CSL.Util ( readNum, last', proc, proc', query, betterThan )
 
 -- | Produce the output with a 'Layout', the 'EvalMode', a 'Bool'
 -- 'True' if the evaluation happens for disambiguation purposes, the
@@ -50,7 +50,7 @@ evalLayout (Layout _ _ es) em b l m o a r
     = cleanOutput evalOut
     where
       evalOut = case evalState job initSt of
-                  [] -> if (isSorting $ em)
+                  [] -> if isSorting em
                         then []
                         else [noOutputError]
                   x | title r == Formatted [Str (citeId cit), Space, Str "not", Space,
@@ -59,15 +59,13 @@ evalLayout (Layout _ _ es) em b l m o a r
       locale = case l of
                  [x] -> x
                  _   -> Locale [] [] [] [] []
-      job    = expandMacros es >>= evalElements
+      job    = evalElements es
       cit    = case em of
                  EvalCite    c -> c
                  EvalSorting c -> c
                  EvalBiblio  c -> c
       initSt = EvalState (mkRefMap r) (Env cit (localeTerms locale) m
                          (localeDate locale) o [] a) [] em b False [] [] False [] [] []
-      -- TODO: is this needed? We already remove titlecase in converting
-      -- from bibtex.
       suppTC = let getLang = take 2 . map toLower in
                case (getLang $ localeLang locale, getLang $ unLiteral $ language r) of
                  (_,  "en") -> id
@@ -103,23 +101,8 @@ evalSorting m l ms opts ss as r
 evalElements :: [Element] -> State EvalState [Output]
 evalElements = concatMapM evalElement
 
-expandMacros :: [Element] -> State EvalState [Element]
-expandMacros = procM expandMacro
-
-expandMacro :: Element -> State EvalState Element
-expandMacro (Choose i ei xs) =
-  Elements emptyFormatting `fmap` evalIfThen i ei xs
-expandMacro (Macro s fm) = do
-  ms <- gets (macros . env)
-  case lookup s ms of
-       Nothing  -> error $ "Macro " ++ show s ++ " not found!"
-       Just els -> Elements fm `fmap` procM expandMacro els
-expandMacro x = return x
-
 evalElement :: Element -> State EvalState [Output]
 evalElement el
-    | Elements fm es <- el        = evalElements es >>= \os ->
-                                      return [Output os fm]
     | Const    s   fm       <- el = return $ addSpaces s
                                            $ if fm == emptyFormatting
                                                 then [OPan (readCSLString s)]
@@ -139,11 +122,26 @@ evalElement el
                                     ifEmpty (evalNames False s n d)
                                             (withNames s el $ evalElements sub)
                                             (appendOutput fm)
-    | Substitute (e:els)    <- el = ifEmpty (consuming $ substituteWith e)
-                                            (getFirst els) id
+    | Substitute (e:els)    <- el = do
+                        res <- consuming $ substituteWith e
+                        if null res
+                           then if null els
+                                   then return [ONull]
+                                   else evalElement (Substitute els)
+                           else return res
     -- All macros and conditionals should have been expanded
-    | Choose _ _  _         <- el = error $ "Unexpanded Choose"
-    | Macro    s   _        <- el = error $ "Unexpanded macro " ++ s
+    | Choose i ei xs        <- el = do
+                        res <- evalIfThen i ei xs
+                        evalElements res
+    | Macro    s   fm       <- el = do
+                        ms <- gets (macros . env)
+                        case lookup s ms of
+                             Nothing  -> error $ "Macro " ++ show s ++ " not found!"
+                             Just els -> do
+                               res <- concat <$> mapM evalElement els
+                               if null res
+                                  then return []
+                                  else return [Output res fm]
     | otherwise                   = return []
     where
       addSpaces strng = (if take 1 strng == " " then (OSpace:) else id) .
@@ -176,7 +174,9 @@ evalElement el
                             case numVars of
                               ["number-of-volumes"] -> not $ any (== "1") nums
                               ["number-of-pages"]   -> not $ any (== "1") nums
-                              _ -> any ('-' `elem`) nums
+                              _ -> any
+                                   (\x -> '-' `elem` x || '\x2013' `elem` x)
+                                   nums
                          pluralizeTerm x = x
                      if null res
                         then return []
@@ -203,10 +203,6 @@ evalElement el
                                         , env = (env s)
                                           {names = tail $ names (env s)}}) >> return r
 
-      getFirst        [] = return []
-      getFirst    (x:xs) = whenElse ((/=) []  <$> substituteWith x)
-                                    (consuming $  substituteWith x)
-                                    (getFirst xs)
       getVariable f fm s = if isTitleVar s || isTitleShortVar s
                            then consumeVariable s >> formatTitle s f fm else
                            case map toLower s of
@@ -239,10 +235,11 @@ evalIfThen (IfThen c' m' el') ei e = whenElse (evalCond m' c') (return el') rest
                         l <- checkCond chkLocator      isLocator       c m
                         return $ match m $ concat [t,v,n,d,p,a,l]
 
-      checkCond a f c m = if f c /= [] then mapM a (f c) else checkMatch m
-      checkMatch m
-          | All    <- m = return [True]
-          | otherwise   = return [False]
+      checkCond a f c m = case f c of
+                               []  -> case m of
+                                           All -> return [True]
+                                           _   -> return [False]
+                               xs  -> mapM a xs
 
       chkType         t = let chk = (==) (formatVariable t) . show . fromMaybe NoType . fromValue
                           in  getVar False chk "ref-type"
@@ -339,7 +336,7 @@ formatNumber f fm v n
 
 checkRange :: [CslTerm] -> String -> String
 checkRange _ [] = []
-checkRange ts (x:xs) = if x == '-'
+checkRange ts (x:xs) = if x == '-' || x == '\x2013'
                        then pageRange ts ++ checkRange ts xs
                        else x             : checkRange ts xs
 
@@ -357,21 +354,25 @@ pageRange = maybe "\x2013" termPlural . findTerm "page-range-delimiter" Long
 
 isNumericString :: String -> Bool
 isNumericString [] = False
-isNumericString s  = null . filter (not . isNumber &&& not . isSpecialChar >>> uncurry (&&)) $
-                     words s
+isNumericString s  = all (\c -> isNumber c || isSpecialChar c) $ words s
 
 isTransNumber, isSpecialChar,isNumber :: String -> Bool
-isTransNumber = and . map isDigit
-isSpecialChar = and . map (flip elem "&-,")
-isNumber      = filter (not . isLetter) >>> filter (not . flip elem "&-,") >>>
-                map isDigit >>> and &&& not . null >>> uncurry (&&)
+isTransNumber = all isDigit
+isSpecialChar = all (`elem` "&-,\x2013")
+isNumber   cs = case [c | c <- cs
+                        , not (isLetter c)
+                        , not (c `elem` "&-,\x2013")] of
+                     []  -> False
+                     xs  -> all isDigit xs
 
 breakNumericString :: [String] -> [String]
 breakNumericString [] = []
 breakNumericString (x:xs)
     | isTransNumber x = x : breakNumericString xs
-    | otherwise       = let (a,b) = break (flip elem "&-,") x
-                            (c,d) = if null b then ("","") else (take 1 b, tail b)
+    | otherwise       = let (a,b) = break (`elem` "&-\x2013,") x
+                            (c,d) = if null b
+                                       then ("","")
+                                       else span (`elem` "&-\x2013,") b
                         in filter (/= []) $  a : c : breakNumericString (d : xs)
 
 formatRange :: Formatting -> String -> State EvalState [Output]
@@ -383,8 +384,10 @@ formatRange fm p = do
       pages = tupleRange . breakNumericString . words $ p
 
       tupleRange [] = []
-      tupleRange (x:"-":[]  ) = return (x,[])
-      tupleRange (x:"-":y:xs) = (x, y) : tupleRange xs
+      tupleRange (x:cs:[]  )
+        | cs `elem` ["-", "--", "\x2013"] = return (x,[])
+      tupleRange (x:cs:y:xs)
+        | cs `elem` ["-", "--", "\x2013"] = (x, y) : tupleRange xs
       tupleRange (x:      xs) = (x,[]) : tupleRange xs
 
       joinRange (a, []) = a

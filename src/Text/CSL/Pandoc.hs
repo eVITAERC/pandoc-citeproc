@@ -4,13 +4,13 @@ module Text.CSL.Pandoc (processCites, processCites') where
 
 import Text.Pandoc
 import Text.Pandoc.Walk
+import Text.Pandoc.Builder (setMeta, deleteMeta, Inlines, cite)
 import Text.Pandoc.Shared (stringify)
 import Text.HTML.TagSoup.Entity (lookupEntity)
 import qualified Data.ByteString.Lazy as L
 import Control.Applicative ((<|>))
 import Data.Aeson
-import Data.List
-import Data.Char ( isDigit, isPunctuation )
+import Data.Char ( isDigit, isPunctuation, isSpace )
 import qualified Data.Map as M
 import Text.CSL.Reference hiding (processCites, Value)
 import Text.CSL.Input.Bibutils (readBiblioFile, convertRefs)
@@ -24,28 +24,58 @@ import Text.CSL.Output.Pandoc ( headInline, tailFirstInlineStr, initInline,
 import Text.CSL.Data (getDefaultCSL)
 import Text.Parsec hiding (State, (<|>))
 import Control.Monad
+import Data.Monoid (mempty)
 import Control.Monad.State
 import System.FilePath
 import System.Directory (doesFileExist, getAppUserDataDirectory)
+import Text.CSL.Util (findFile, splitStrWhen)
 
 -- | Process a 'Pandoc' document by adding citations formatted
 -- according to a CSL style.  Add a bibliography (if one is called
 -- for) at the end of the document.
 processCites :: Style -> [Reference] -> Pandoc -> Pandoc
-processCites style refs doc =
-  let doc'       = evalState (walkM setHashes doc) 1
-      grps       = query getCitation doc'
-      result     = citeproc procOpts style refs (setNearNote style $
-                      map (map toCslCite) grps)
-      cits_map   = M.fromList $ zip grps (citations result)
-      biblioList = map (renderPandoc' style) (bibliography result)
-      Pandoc m b = bottomUp mvPunct . deNote .
-                     topDown (processCite style cits_map) $ doc'
-      (bs, lastb) = case reverse b of
-                         x@(Header _ _ _) : xs -> (reverse xs, [x])
-                         _                     -> (b,  [])
+processCites style refs (Pandoc m1 b1) =
+  let m2            = setMeta "nocites-wildcards" (mkNociteWildcards refs m1) m1
+      Pandoc m3 b2  = evalState (walkM setHashes $ Pandoc m2 b1) 1
+      grps          = query getCitation $ Pandoc m3 b2
+      m4            = deleteMeta "nocites-wildcards" m3
+      locMap        = locatorMap style
+      result        = citeproc procOpts style refs (setNearNote style $
+                        map (map (toCslCite locMap)) grps)
+      cits_map      = M.fromList $ zip grps (citations result)
+      biblioList    = map (renderPandoc' style) (bibliography result)
+      Pandoc m b3   = bottomUp (mvPunct style) . deNote .
+                        topDown (processCite style cits_map) $ Pandoc m4 b2
+      (bs, lastb)    = case reverse b3 of
+                          (Header lev (id',classes,kvs) ys) : xs ->
+                           (reverse xs, [Header lev (id',classes',kvs) ys])
+                            where classes' = "unnumbered" :
+                                       [c | c <- classes, c /= "unnumbered"]
+                          _                                      -> (b3,  [])
   in  Pandoc m $ bottomUp (concatMap removeNocaseSpans)
-               $ bs ++ [Div ("",["references"],[]) (lastb ++ biblioList)]
+               $ bs ++
+                 if lookupMeta "suppress-bibliography" m == Just (MetaBool True)
+                    then []
+                    else [Div ("",["references"],[]) (lastb ++ biblioList)]
+
+-- if the 'nocite' Meta field contains a citation with id = '*',
+-- create a cite with to all the references.
+mkNociteWildcards :: [Reference] -> Meta -> Inlines
+mkNociteWildcards refs meta =
+  case lookupMeta "nocite" meta of
+       Nothing      -> mempty
+       Just nocites ->
+         case [c | c <- concat (query getCitation nocites)
+                 , citationId c == "*"] of
+              []    -> mempty
+              (_:_) -> cite allcites mempty
+         where allcites = map (\ref -> Citation{
+                                  citationId = unLiteral (refId ref),
+                                  citationPrefix = [],
+                                  citationSuffix = [],
+                                  citationMode = NormalCitation,
+                                  citationNoteNum = 0,
+                                  citationHash = 0 }) refs
 
 removeNocaseSpans :: Inline -> [Inline]
 removeNocaseSpans (Span ("",["nocase"],[]) xs) = xs
@@ -67,14 +97,23 @@ processCites' (Pandoc meta blocks) = do
   let refs = inlineRefs ++ bibRefs
   let cslfile = (lookupMeta "csl" meta <|> lookupMeta "citation-style" meta)
                 >>= toPath
-  rawCSL <- maybe getDefaultCSL (\f -> findFile [".", csldir] f >>= L.readFile)
-               cslfile
   let mbLocale = lookupMeta "locale" meta >>= toPath
-  csl <- localizeCSL mbLocale $ parseCSL' rawCSL
+  csl <- case cslfile of
+               Just f | not (null f) -> readCSLFile mbLocale f
+               _ -> do
+                 -- get default CSL: look first in ~/.csl, and take
+                 -- from distribution if not found
+                 let f = csldir </> "chicago-author-date.csl"
+                 exists <- doesFileExist f
+                 raw <- if exists
+                           then L.readFile f
+                           else getDefaultCSL
+                 localizeCSL mbLocale $ parseCSL' raw
   let cslAbbrevFile = lookupMeta "citation-abbreviations" meta >>= toPath
   let skipLeadingSpace = L.dropWhile (\s -> s == 32 || (s >= 9 && s <= 13))
   abbrevs <- maybe (return (Abbreviations M.empty))
              (\f -> findFile [".", csldir] f >>=
+                    maybe (error $ "Could not find " ++ f) return >>=
                L.readFile >>=
                either error return . eitherDecode . skipLeadingSpace)
              cslAbbrevFile
@@ -90,7 +129,7 @@ getBibRefs :: MetaValue -> IO [Reference]
 getBibRefs (MetaList xs) = concat `fmap` mapM getBibRefs xs
 getBibRefs (MetaInlines xs) = getBibRefs (MetaString $ stringify xs)
 getBibRefs (MetaString s) = do
-  path <- findFile ["."] s
+  path <- findFile ["."] s >>= maybe (error $ "Could not find " ++ s) return
   map unescapeRefId `fmap` readBiblioFile path
 getBibRefs _ = return []
 
@@ -131,12 +170,27 @@ isNote (Note _) = True
 isNote (Cite _ [Note _]) = True
 isNote _ = False
 
-mvPunct :: [Inline] -> [Inline]
-mvPunct (Space : Space : xs) = Space : xs
-mvPunct (Space : x : ys) | isNote x, startWithPunct ys =
+mvPunctInsideQuote :: Inline -> Inline -> [Inline]
+mvPunctInsideQuote (Quoted qt ils) (Str s) | s `elem` [".", ","] =
+  [Quoted qt (init ils ++ (mvPunctInsideQuote (last ils) (Str s)))]
+mvPunctInsideQuote il il' = [il, il']
+
+mvPunct :: Style -> [Inline] -> [Inline]
+mvPunct _ (Space : Space : xs) = Space : xs
+mvPunct _ (Space : x : ys) | isNote x, startWithPunct ys =
    Str (headInline ys) : x : tailFirstInlineStr ys
-mvPunct (Space : x : ys) | isNote x = x : ys
-mvPunct xs = xs
+mvPunct _ (Cite cs ils : ys) |
+     length ils > 1
+   , isNote (last ils)
+   , startWithPunct ys
+   = Cite cs (init ils ++ [Str (headInline ys) | not (endWithPunct (init ils))]
+     ++ [last ils]) : tailFirstInlineStr ys
+mvPunct sty (q@(Quoted _ _) : w@(Str _) : x : ys)
+  | isNote x, isPunctuationInQuote sty  =
+    mvPunctInsideQuote q w ++ (x : ys)
+mvPunct _ (Space : x : ys) | isNote x = x : ys
+mvPunct _ (Space : x@(Cite _ (Superscript _ : _)) : ys) = x : ys
+mvPunct _ xs = xs
 
 endWithPunct :: [Inline] -> Bool
 endWithPunct [] = True
@@ -155,24 +209,28 @@ startWithPunct = and . map (`elem` ".,;:!?") . headInline
 deNote :: Pandoc -> Pandoc
 deNote = topDown go
   where go (Cite (c:cs) [Note xs]) =
-            Cite (c:cs) [Note $ dropInitialPunct $ bottomUp go' $ sanitize c xs]
-        go (Note xs) = Note $ bottomUp go' xs
+            Cite (c:cs) [Note $ sanitize xs]
+        go (Note xs) = Note $ topDown go' xs
         go x = x
-        go' (Note [Para xs]:ys) =
-             if startWithPunct ys && endWithPunct xs
-                then initInline xs ++ ys
-                else xs ++ ys
+        go' (x : Cite cs [Note [Para xs]] : ys) | x /= Space =
+             x : Str "," : Space : comb (\zs -> [Cite cs zs]) xs ys
+        go' (x : Note [Para xs] : ys) | x /= Space =
+             x : Str "," : Space : comb id xs ys
+        go' (Cite cs [Note [Para xs]] : ys) = comb (\zs -> [Cite cs zs]) xs ys
+        go' (Note [Para xs] : ys) = comb id xs ys
         go' xs = xs
-        dropInitialPunct [Para (Str [c]:Space:xs)] | c `elem` ",;:" = [Para xs]
-        dropInitialPunct bs                                         = bs
-        sanitize :: Citation -> [Block] -> [Block]
-        sanitize Citation{citationPrefix = pref} [Para xs] =
-           case (null pref, endWithPunct xs) of
-                (True, False)  -> [Para $ xs ++ [Str "."]]
-                (True, True)   -> [Para xs]
-                (False, False) -> [Para $ toCapital $ xs ++ [Str "."]]
-                (False, True)  -> [Para $ toCapital xs]
-        sanitize _ bs = bs
+        removeLeadingPunct (Str [c] : Space : xs)
+          | c == ',' || c == '.' || c == ':' = xs
+        removeLeadingPunct xs = xs
+        comb f xs ys =
+           let xs' = if startWithPunct ys && endWithPunct xs
+                        then initInline $ removeLeadingPunct xs
+                        else removeLeadingPunct xs
+           in f xs' ++ ys
+        sanitize :: [Block] -> [Block]
+        sanitize [Para xs] =
+           [Para $ toCapital xs ++ if endWithPunct xs then [Space] else []]
+        sanitize bs = bs
 
 isTextualCitation :: [Citation] -> Bool
 isTextualCitation (c:_) = citationMode c == AuthorInText
@@ -195,15 +253,14 @@ setHash c = do
   put $ ident + 1
   return c{ citationHash = ident }
 
-toCslCite :: Citation -> CSL.Cite
-toCslCite c
-    = let (l, s)  = locatorWords $ citationSuffix c
-          (la,lo) = parseLocator l
-          s'      = case (l,s) of
+toCslCite :: LocatorMap -> Citation -> CSL.Cite
+toCslCite locMap c
+    = let (la, lo, s)  = locatorWords locMap $ citationSuffix c
+          s'      = case (la,lo,s) of
                          -- treat a bare locator as if it begins with space
                          -- so @item1 [blah] is like [@item1, blah]
-                         ("",(x:_))
-                           | not (isPunct x) -> [Space] ++ s
+                         ("","",(x:_))
+                           | not (isPunct x) -> Space : s
                          _                   -> s
           isPunct (Str (x:_)) = isPunctuation x
           isPunct _           = False
@@ -222,23 +279,18 @@ toCslCite c
                      , CSL.citeHash       = citationHash c
                      }
 
-locatorWords :: [Inline] -> (String, [Inline])
-locatorWords inp =
-  case parse pLocatorWords "suffix" $ breakup inp of
+locatorWords :: LocatorMap -> [Inline] -> (String, String, [Inline])
+locatorWords locMap inp =
+  case parse (pLocatorWords locMap) "suffix" $
+         splitStrWhen (\c -> isPunctuation c || isSpace c) inp of
        Right r   -> r
-       Left _    -> ("",inp)
-   where breakup [] = []
-         breakup (Str x : xs) = map Str (splitup x) ++ breakup xs
-         breakup (x : xs) = x : breakup xs
-         splitup = groupBy (\x y -> x /= '\160' && y /= '\160')
+       Left _    -> ("","",inp)
 
-pLocatorWords :: Parsec [Inline] st (String, [Inline])
-pLocatorWords = do
-  l <- pLocator
+pLocatorWords :: LocatorMap -> Parsec [Inline] st (String, String, [Inline])
+pLocatorWords locMap = do
+  (la,lo) <- pLocator locMap
   s <- getInput -- rest is suffix
-  if length l > 0 && last l == ','
-     then return (init l, Str "," : s)
-     else return (l, s)
+  return (la, lo, s)
 
 pMatch :: (Inline -> Bool) -> Parsec [Inline] st Inline
 pMatch condition = try $ do
@@ -249,35 +301,54 @@ pMatch condition = try $ do
 pSpace :: Parsec [Inline] st Inline
 pSpace = pMatch (\t -> t == Space || t == Str "\160")
 
-pLocator :: Parsec [Inline] st String
-pLocator = try $ do
+pLocator :: LocatorMap -> Parsec [Inline] st (String, String)
+pLocator locMap = try $ do
   optional $ pMatch (== Str ",")
   optional pSpace
-  f  <- (guardFollowingDigit >> return [Str "p"]) -- "page" the default
-     <|> many1 (notFollowedBy pSpace >> anyToken)
-  gs <- many1 pWordWithDigits
-  return $ stringify f ++ (' ' : unwords gs)
+  rawLoc <- many
+     (notFollowedBy pSpace >> notFollowedBy (pWordWithDigits True) >> anyToken)
+  la <- case stringify rawLoc of
+                 ""   -> lookAhead (optional pSpace >> pDigit) >> return "page"
+                 s    -> maybe mzero return $ parseLocator locMap s
+  g <- pWordWithDigits True
+  gs <- many (pWordWithDigits False)
+  let lo = concat (g:gs)
+  return (la, lo)
 
-guardFollowingDigit :: Parsec [Inline] st ()
-guardFollowingDigit = do
-  t <- lookAhead anyToken
-  case t of
-       Str (d:_) | isDigit d -> return ()
-       _                     -> mzero
-
-pWordWithDigits :: Parsec [Inline] st String
-pWordWithDigits = try $ do
-  optional pSpace
-  r <- many1 (notFollowedBy pSpace >> anyToken)
+-- we want to capture:  123, 123A, C22, XVII, 33-44, 22-33; 22-11
+pWordWithDigits :: Bool -> Parsec [Inline] st String
+pWordWithDigits isfirst = try $ do
+  punct <- if isfirst
+              then return ""
+              else stringify `fmap` pLocatorPunct
+  sp <- option "" (pSpace >> return " ")
+  r <- many1 (notFollowedBy pSpace >> notFollowedBy pLocatorPunct >> anyToken)
   let s = stringify r
-  guard $ any isDigit s
-  return s
+  guard $ any isDigit s || all (`elem` "IVXLCM") s
+  return $ punct ++ sp ++ s
 
-findFile :: [FilePath] -> FilePath -> IO FilePath
-findFile [] f = fail $ "Not found: " ++ f
-findFile (p:ps) f = do
-  exists <- doesFileExist (p </> f)
-  if exists
-     then return (p </> f)
-     else findFile ps f
+pDigit :: Parsec [Inline] st ()
+pDigit = do
+  t <- anyToken
+  case t of
+      Str (d:_) | isDigit d -> return ()
+      _ -> mzero
 
+pLocatorPunct :: Parsec [Inline] st Inline
+pLocatorPunct = pMatch isLocatorPunct
+
+isLocatorPunct :: Inline -> Bool
+isLocatorPunct (Str [c]) = isPunctuation c
+isLocatorPunct _         = False
+
+type LocatorMap = M.Map String String
+
+parseLocator :: LocatorMap -> String -> Maybe String
+parseLocator locMap s = M.lookup s locMap
+
+locatorMap :: Style -> LocatorMap
+locatorMap sty =
+  foldr (\term -> M.insert (termSingular term) (cslTerm term)
+                . M.insert (termPlural term) (cslTerm term))
+    M.empty
+    (concatMap localeTerms $ styleLocale sty)

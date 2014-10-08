@@ -75,7 +75,9 @@ groupCites (x:xs) = let equal    = filter ((==) (namesOf $ snd x) . namesOf . sn
       contribsQ o
           | OContrib _ _ c _ _ <- o = [c]
           | otherwise               = []
-      namesOf y = if null (query contribsQ y) then [] else proc rmNameHash . proc rmGivenNames $ head (query contribsQ y)
+      namesOf y = case query contribsQ y of
+                       []    -> []
+                       (z:_) -> proc rmHashAndGivenNames z
 
 getYearAndSuf :: Output -> Output
 getYearAndSuf x
@@ -129,7 +131,7 @@ collapseYear s ranged (CG cs f d os) = CG cs f [] (process os)
                              else (a, Output (b : [ODel d          ]) emptyFormatting) : doCollapse xs
 
       contribsQ o
-          | OContrib _ _ c _ _ <- o = [proc' rmNameHash . proc' rmGivenNames $ c]
+          | OContrib _ _ c _ _ <- o = [proc' rmHashAndGivenNames c]
           | otherwise               = []
       namesOf = query contribsQ
       process = doCollapse . groupBy (\a b -> namesOf (snd a) == namesOf (snd b)) . groupCites

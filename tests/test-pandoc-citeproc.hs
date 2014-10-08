@@ -21,11 +21,13 @@ import Text.Pandoc.Process (pipeProcess)
 import qualified Data.Yaml as Yaml
 import Text.Pandoc (writeNative, writeHtmlString, readNative, def)
 import Text.CSL.Pandoc (processCites')
+import Data.List (isSuffixOf)
 
 main = do
-  citeprocTests <- mapM testCase ["chicago-author-date", "ieee", "mhra",
-                                  "number-of-volumes", "no-author", "issue7",
-                                  "issue13", "issue14"]
+  testnames <- fmap (map (dropExtension . takeBaseName) .
+                     filter (".in.native" `isSuffixOf`)) $
+               getDirectoryContents "tests"
+  citeprocTests <- mapM testCase testnames
   fs <- filter (\f -> takeExtension f `elem` [".bibtex",".biblatex"])
            `fmap` getDirectoryContents "tests/biblio2yaml"
   biblio2yamlTests <- mapM biblio2yamlTest fs
@@ -37,7 +39,7 @@ main = do
   putStrLn $ show numpasses ++ " passed; " ++ show numfailures ++
               " failed; " ++ show numskipped ++ " skipped; " ++
               show numerrors ++ " errored."
-  exitWith $ if numfailures == 0
+  exitWith $ if numfailures == 0 && numerrors == 0
                 then ExitSuccess
                 else ExitFailure $ numfailures + numerrors
 
@@ -53,7 +55,7 @@ data TestResult =
 
 testCase :: String -> IO TestResult
 testCase csl = do
-  hPutStr stderr $ "[" ++ csl ++ ".in.json] "
+  hPutStr stderr $ "[" ++ csl ++ ".in.native] "
   indataNative <- readFile $ "tests/" ++ csl ++ ".in.native"
   expectedNative <- readFile $ "tests/" ++ csl ++ ".expected.native"
   let jsonIn = Aeson.encode $ (read indataNative :: Pandoc)
@@ -103,7 +105,7 @@ biblio2yamlTest fp = do
   (ec, result, errout) <- pipeProcess
                      (Just [("LANG","en_US.UTF-8"),("HOME",".")])
                      "dist/build/pandoc-citeproc/pandoc-citeproc"
-                     ["bib2yaml", "-f", drop 1 $ takeExtension fp] bib
+                     ["--bib2yaml", "-f", drop 1 $ takeExtension fp] bib
   if ec == ExitSuccess
      then do
        let expectedDoc :: Maybe Aeson.Value

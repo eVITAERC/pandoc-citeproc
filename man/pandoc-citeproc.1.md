@@ -1,8 +1,6 @@
 ---
 title: pandoc-citeproc
 section: 1
-footer: pandoc-citeproc manual
-date: August 31, 2013
 ...
 
 # NAME
@@ -21,7 +19,12 @@ The `pandoc-citeproc` executable has two modes, filter mode and convert mode.
 
 Run without options, it acts as a filter that takes a JSON-encoded Pandoc
 document, formats citations and adds a bibliography, and returns a JSON-encoded
-pandoc document.
+pandoc document.  Citations will be resolved, and a bibliography will be
+appended to the end of the document (unless the `suppress-bibliography`
+metadata field is set to a true value).  If you wish the bibliography to
+have a section header, put the section header at the end of your
+document.  (See the `pandoc_markdown` (5) man page under "Citations"
+for details on how to encode citations in pandoc's markdown.)
 
 To process citations with pandoc, call pandoc-citeproc as a filter:
 
@@ -70,10 +73,13 @@ appropriate:  so, for example, emphasis and strong emphasis can
 be used in title fileds. Simple tex math will also be
 parsed and rendered appropriately.
 
-`csl` or `citation-style`: Path to a CSL style file.  If the file is not found
-relative to the working directory, pandoc-citeproc will look in the
-`$HOME/.csl` directory (or `C:\Users\USERNAME\AppData\Roaming\csl` in Windows
-7).
+`csl` or `citation-style`: Path or URL of a CSL style file.
+If the file is not found relative to the working directory,
+pandoc-citeproc will look in the `$HOME/.csl` directory (or
+`C:\Users\USERNAME\AppData\Roaming\csl` in Windows 7).  If this is left
+off, pandoc-citeproc will look for `$HOME/.csl/chicago-author-date.csl`,
+and if this is not present, it will use its own version of
+`chicago-author-date.csl`.
 
 `citation-abbreviations`:  Path to a CSL abbreviations JSON file. The format
 is described [here](http://citationstylist.org/2011/10/19/abbreviations-for-zotero-test-release).  Here is a short example:
@@ -123,7 +129,81 @@ This mode supersedes the old `biblio2yaml` program.
 `-f` *FORMAT*, `--format=`*FORMAT*
 :   Specify format of bibliography to be converted.  Legal values are
     `biblatex`, `bibtex`, `ris`, `endnote`, `endnotexml`, `isi`,
-    `medline`, `copac`, and `json`.
+    `medline`, `copac`, `mods`, and `json`.
+
+# NOTES
+
+## General
+
+If you use a biblatex database, closely follow the specifications in the
+"Database Guide" section of the biblatex manual (currently 2.8a).
+
+If you use a CSL-YAML or CSL-JSON database, or a CSL-YAML metadata section in
+your markdown document, follow the "Citation Style Language 1.0.1 Language
+Specification" (<http://citationstyles.org/downloads/specification.html>).
+Particularly relevant are
+<http://citationstyles.org/downloads/specification.html#appendix-iii-types>
+(which neither comments on usage nor specifies required and optional fields) and
+<http://citationstyles.org/downloads/specification.html#appendix-iv-variables>
+(which does contain comments).
+
+## Titles: Title vs. Sentence Case
+
+If you are using a bibtex or biblatex bibliography, then observe
+the following rules:
+
+  - English titles should be in title case.  Non-English titles should
+    be in sentence case, and the `langid` field in biblatex should be
+    set to the relevant language.  (The following values are treated
+    as English:  `american`, `british`, `canadian`, `english`,
+    `australian`, `newzealand`, `USenglish`, or `UKenglish`.)
+
+  - As is standard with bibtex/biblatex, proper names should be
+    protected with curly braces so that they won't be lowercased
+    in styles that call for sentence case.  For example:
+
+        title = {My Dinner with {Andre}}
+
+  - In addition, words that should remain lowercase (or camelCase)
+    should be protected:
+
+        title = {Spin Wave Dispersion on the {nm} Scale}
+
+    Though this is not necessary in bibtex/biblatex, it is necessary
+    with citeproc, which stores titles internally in sentence case,
+    and converts to title case in styles that require it.  Here we
+    protect "nm" so that it doesn't get converted to "Nm" at this stage.
+
+If you are using a CSL bibliography (either JSON or YAML), then observe
+the following rules:
+
+  - All titles should be in sentence case.
+
+  - Use the `language` field for non-English titles to prevent their
+    conversion to title case in styles that call for this. (Conversion
+    happens only if `language` begins with `en` or is left empty.)
+
+  - Protect words that should not be converted to title case using
+    this syntax:
+
+        Spin wave dispersion on the <span class="nocase">nm</span> scale
+
+## Conference Papers, Published vs. Unpublished
+
+For a formally published conference paper, use the biblatex entry type
+`inproceedings` (which will be mapped to CSL `paper-conference`).
+
+For an unpublished manuscript, use the biblatex entry type `unpublished`
+without an `eventtitle` field (this entry type will be mapped to CSL
+`manuscript`).
+
+For a talk, an unpublished conference paper, or a poster presentation, use the
+biblatex entry type `unpublished` with an `eventtitle` field (this entry type
+will be mapped to CSL `speech`). Use the biblatex `type` field to indicate the
+type, e.g. "Paper", or "Poster". `venue` and `eventdate` may be useful too,
+though `eventdate` will not be rendered by most CSL styles. Note that `venue`
+is for the event's venue, unlike `location` which describes the publisher's
+location; do not use the latter for an unpublished conference paper.
 
 # AUTHORS
 
@@ -131,7 +211,7 @@ Andrea Rossato and John MacFarlane.
 
 # SEE ALSO
 
-`pandoc` (1).
+`pandoc` (1), `pandoc_markdown` (5).
 
 The pandoc-citeproc source code and all documentation may be downloaded
 from <http://github.com/jgm/pandoc-citeproc/>.

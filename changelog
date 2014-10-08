@@ -1,3 +1,167 @@
+pandoc-citeproc (0.6)
+
+  * The CSL parser has been replaced with a new, xml-conduit based module,
+    which does not rely on C libraries and should be easier to repair
+    and extend.  The module has been checked against the old module with all
+    CSL files in the citeproc repository.  The only differences
+    are with attribute values beginning or ending with a nonbreaking
+    space (e.g. with French guillemets), and the new parser's behavior
+    (preserving the spaces) is clearly correct.  Parsing was measured as
+    about twice as fast in a benchmark.
+  * The `hexpat` cabal flag has been removed.
+  * The old `Text.CSL.Pickle` and `Text.CSL.Pickle.*` modules have been
+    removed.
+  * Plural locator labels (e.g. 'pp.') are now used for page ranges
+    containing en-dashes (#84).
+  * `Elements` has been removed from `Element`.  It was entirely unnecessary,
+    used only once (and dispensibly) in `Text.CSL.Eval`.
+    This change results in cleaner code.
+  * Improved man page generation.
+  * Updated `chicago-author-date.csl` default style.
+
+pandoc-citeproc (0.5)
+
+  * Revised locator parsing:
+    + parseLocator now looks for the "short" forms of terms in
+      the style's locale(s).  So, in English you'd use "p." or
+      "ch."; in German, "S." or "Kap."
+    + Note that the locator label must match what is in the locale
+      file, including the period.  Before this change, you could omit
+      the period: "p 12" or "p. 12" would both give you a "page."
+      Also, previously, the locators were case-insensitive; now they must
+      be in the same case as in the locale.  (English "p.", German "S.".)
+    + "no." no longer gets parsed as a "note": closes #74.
+    + Text.CSL.Reference no longer exports parseLocator.
+      parseLocator is now used only locally, in Text.CSL.Pandoc.
+  * Data.getLocale:  Try 2-letter locale lookup if longer locale not found.
+    This should fix an error that occured with less common locales
+    (jgm/pandoc#1548).
+  * Added parseNames field to Agent.  Set parse-names=true
+    when writing CSL JSON and collapsing suffix or particles into
+    first or last names.
+  * Properly handle agents with 'parse-names' set to 'true' (#77).
+    Note that parse-names defaults to true if not set, as in Zotero.
+  * Reference:  added explicit exports.
+  * Styles:  Added explicit export list.
+  * Eval: Fixed isNumericString to recognize en dash (#74).
+  * Allow bibtex double quotes to be escaped inside {} (jgm/pandoc#1568).
+  * Titlecase transform improvements (#76).
+  * Added two csl files missing from tests/.
+  * Performance improvements:  Avoid unnecessary Output groupings.
+    Eliminated some unnecessary generic traversals.  (#71)
+  * Makefile:  Use cpphs. Text.CSL.Data seems to break on OSX 10.9 without it.
+  * Added prof target to Makefile
+  * Test suite: don't exit with success if there were errors!
+
+pandoc-citeproc (0.4.0.1)
+
+  * Interpret date literals with underscores (e.g. "2004_2006") as ranges.
+    This covers a common workaround for a deficiency in Zotero (#65).
+  * Correctly handle "literal" in CSL date (#65).
+  * Fixed erroneous capitalization of the first ibid. in a citation,
+    even in the middle of a sentence (#68).  Removed "ibid-c",
+    "ibid-locator-c" classifications.
+  * Pandoc:  Capitalize first word of citation note, unless span=nocase.
+    Previously we only capitalized citations.  This captures ibid
+    and the like.
+  * Text.CSL.Util.toCapital:  respect `<span class="nocase">`.
+  * Turn small caps into SmallCaps element in reading CSL JSON (#67).
+    Either the <span style="font-variant:small-caps"> or the <sc>
+    variant may be used.
+  * Added "ca", "c", "et" to list of short words in titlecase transforms
+    (#66).
+  * Fixed some errors in the no-author test case.
+  * test-pandoc-citeproc:  Avoid running tests twice!
+  * Check for en dash in checking for page ranges (#70).
+  * Removed unused texmath build-depend.
+
+pandoc-citeproc (0.4)
+
+  * Fixed #58 - previously not all substitute alternatives were tried.
+  * Made first parameter of OName an Agent, not a String (API change).
+    Also moved Agent from Reference to Style.
+  * test-pandoc-citeproc: run tests on all matching files in the directory.
+    This removes the need to recompile when new tests are added.
+  * Style: Fixed appendWithPunct (mappend for Formatted).  One definition
+    was wrong, causing commas to be lost in certain places (#57).
+  * Support \nocite{*}.  If the `nocite` metadata filed contains a citation
+    with identifier `*`, all entries in the bibliography are included
+    in the references (#64).
+  * Bump upper bound for aeson.
+  * Removed span nodecor around 'ser.' (#60).
+  * Print series as "3rd ser." (using locale's ordinal) (#60).
+  * Added scaffolding for 'ordinalize' and infrastructure for
+    accessing locale information to Bibtex.
+  * Export new parseLocale from Text.CSL.Parser.
+  * Move punctuation before fn in in-text citation before punctuation (#59).
+  * Updated locales and chicago-author-date.csl.
+  * Use collection-title for series, even for articles (#60).
+  * Fixed locator parsing so capital roman numerals are legal numbers (#61).
+  * Map bookinbook -> chapter (#62).
+  * Better error message from parseString.
+  * Remove space before superscript citation (pandoc #1327).
+  * Fixed spurious "et al" problem (#27).
+  * Match biblatex's method for separating von from last name, for biblatex.
+    For bibtex, we match the documented bibtex algorithm as before (#50).
+    Test case:  Drummond de Andrade, Carlos.
+    bibtex makes "Drummond de" a dropping particle.
+    biblatex takes "Drummond de Andrade" to be the last name.
+  * Leave off bibliography if `suppress-bibliography` has a true value
+    in the document metadata (#40, with thanks to Jesse Rosenthal).
+  * Try empty (null) 'csl' as if no 'csl' was specified.
+    (The default chicago-author-date.csl is then used.)
+  * Fixed #51:  empty braces with date range.
+  * Set pageFirst automatically from page range (#31).
+  * Bibtex input: set page-first automatically.
+  * Fixed capitalization of first word in sentence (#25).
+    E.g. "foo bar baz: bazbaz foo" should turn into
+    "Foo Bar Baz: Bazbaz Foo" in titlecase, but was turning into
+    "foo Bar Baz: bazbaz Foo."
+  * pandoc-citeproc:  Allow conversion of mods bibliographies (#28).
+  * readCSLFile now supports dependent styles (#30).
+  * Removed network flag.  We now use pandoc's fetchItem.
+  * Changed type of findFile, so it returns a Maybe.
+  * Documented fact that you can specify a URL under 'csl:'.
+  * Added locale parameter to readCSLFile (API change).
+    readCSLFile also now looks in ~/.csl for the file, if it isn't
+    found locally.
+  * Moved findFile to Util.
+  * Bibtex/biblatex:  map "unpublished" to "speech" if
+    the record contains "eventtitle", "eventdate", or "venue".
+    Otherwise map it to "manuscript" as before (#44).
+  * Look for chicago-author-date.csl in ~/.csl if no csl specified.
+    If not found there, use the chicago-author-date.csl that comes with
+    the distribution (#48).
+  * Improved case transform behavior with punctuation.
+    Previously capitalization might change after a word-internal period
+    or apostrophe.  Now internal punctuation only signals a word
+    boundary if it is a dash or single quote character.
+
+pandoc-citeproc (0.3.1)
+
+  * Marked final heading (if present) as "unnumbered" (pandoc #1277).
+  * Treat empty 'references' (empty string) as empty list.
+  * Fixed titlecase transformation of words containing '.
+  * Fixed punctuation in notes.
+  * Improved test suite.
+  * FromJSON for Formatted: handle block lists as well as inline.
+  * Require yaml >= 0.8.8.2.
+  * Fixed spacing problem with citations in notes in footnote styles
+    (pandoc #1036).
+  * Updated chicago-author-date.csl and locales (#34).
+  * Move punctuation inside quotes, depending on style.  This is activated by
+    the `punctuation-in-quote` locale option, which has a default
+    per locale but can be overridden in the style.  This gives more flexibility.
+    (Thanks to Jesse Rosenthal.)
+  * Moved `isPunctuationInQuote` to `Text.CSL.Style` and rewrote.
+    Previously it was in `Text.CSL.Output.Pandoc`.
+    It doesn't need to use generics and no longer does.
+  * Fixed recognition of "byzantine" names.  Names with curly apostrophes were
+    being counted as non-byzantine, and printed given-first with no space
+    (#39).
+  * Fixed representation of reference types to conform to CSL (#24):
+    `motion_picture`, `legal_case`, `musical_score`, `personal_communication`.
+
 pandoc-citeproc (0.3.0.1)
 
   * Require ghc-prim if ghc < 7.6 (needed for generics).

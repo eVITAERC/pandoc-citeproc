@@ -17,7 +17,7 @@ module Text.CSL.Eval.Names where
 
 import Control.Applicative ( (<$>) )
 import Control.Monad.State
-import Data.Char  ( isLower, isUpper )
+import Data.Char  ( isLower, isUpper, isLetter )
 import Data.List  ( nub, intersperse )
 import Data.List.Split ( wordsBy )
 import Data.Maybe ( isJust )
@@ -26,8 +26,7 @@ import Data.Monoid
 import Text.CSL.Eval.Common
 import Text.CSL.Eval.Output
 import Text.CSL.Util ( headInline, lastInline, readNum, (<^>), query, toRead,
-                       capitalize, splitStrWhen )
-import Text.CSL.Reference
+                       splitStrWhen )
 import Text.CSL.Style
 import Text.Pandoc.Definition
 import Text.Pandoc.Shared ( stringify )
@@ -55,10 +54,10 @@ evalNames skipEdTrans ns nl d
                   st  <- get
                   fb  <- agents "subsequent" s ags
                   put st
-                  if res /= []
-                    then let role = if aus == ["author"] then concat aus ++ "sub" else s
+                  if null res
+                    then     return []
+                    else let role = if aus == ["author"] then "authorsub" else s
                          in  return . return . OContrib k role res fb =<< gets etal
-                    else     return []
         r'  <- evalNames skipEdTrans xs nl d
         num <- gets contNum
         return $ if r /= [] && r' /= []
@@ -101,10 +100,10 @@ formatNames ea del p s as n
                                   x  -> read $ toRead x
                       _      -> f
             genName x = do etal' <- formatEtAl o ea "et-al" fm del' x
-                           if etal' == []
+                           if null etal'
                               then do t <- getTerm False Long "and"
                                       return $ delim t o del' $ format m o form fm np x
-                              else do return $ (addDelim del' $ format m o form fm np x) ++ etal'
+                              else return $ (addDelim del' $ format m o form fm np x) ++ etal'
         setLastName o $ formatName m False f fm o np (last as)
         updateEtal =<< mapM genName [1 + i .. length as]
         genName i
@@ -114,7 +113,10 @@ formatNames ea del p s as n
         res <- formatLabel f fm (isPlural pl $ length as) $
                if b then "editortranslator" else s
         modify $ \st -> st { edtrans = False }
-        updateEtal [res]
+        -- Note: the following line was here previously.
+        -- It produces spurious 'et al's and seems to have no function,
+        -- so I have commented it out:
+        -- updateEtal [tr' "res" res]
         return res
 
     | EtAl fm t <- n = do
@@ -127,8 +129,8 @@ formatNames ea del p s as n
                  t' = if null t then "et-al" else t
              r <- mapM (et_al o False t' fm del) [i .. length as]
              let (r',r'') = case r of
-                              (x:xs) -> ( x,xs ++ [])
-                              _      -> ([],      [])
+                              (x:xs) -> (x, xs)
+                              []     -> ([],[])
              updateEtal r''
              return r'
 
@@ -138,9 +140,9 @@ formatNames ea del p s as n
       isBib  _             = False
       updateEtal x = modify $ \st ->
                      let x' = if length x == 1 then repeat $ head x else x
-                     in st { etal = if etal st /= []
-                                    then map (uncurry (++)) . zip (etal st) $ x'
-                                    else x
+                     in st { etal = case etal st of
+                                         []  -> x
+                                         ys  -> zipWith (++) ys x'
                            }
       isWithLastName os
           | "true" <-       getOptionVal "et-al-use-last"  os
@@ -181,7 +183,7 @@ formatNames ea del p s as n
            else et_al o b t fm d i
       et_al o b t fm d i
           = when' (gets mode >>= return . not . isSorting) $
-            if b || length as <= i
+            if (b || length as <= i)
             then return []
             else do x <- getTerm False Long t
                     when' (return $ x /= []) $
@@ -234,11 +236,9 @@ isEtAl b os p as
 -- 'Bool' indicate whether we are formatting the first name or not.
 formatName :: EvalMode -> Bool -> Form -> Formatting -> [Option] -> [NamePart] -> Agent -> [Output]
 formatName m b f fm ops np n
-    -- TODO awkward to use serialized string version of an Agent here;
-    -- why not make OName take an Agent instead of a String??
-    | literal n /= mempty = return $ OName (show n)  institution []         fm
-    | Short      <- f = return $ OName (show n)  shortName       disambdata fm
-    | otherwise       = return $ OName (show n) (longName given) disambdata fm
+    | literal n /= mempty = return $ OName n  institution []         fm
+    | Short      <- f = return $ OName n  shortName       disambdata fm
+    | otherwise       = return $ OName n (longName given) disambdata fm
     where
       institution = oPan' (unFormatted $ literal n) (form "family")
       when_ c o = if c /= mempty then o else mempty
@@ -298,11 +298,10 @@ formatName m b f fm ops np n
       family    = familyName n
       dropping  = droppingPart n
       nondropping  = nonDroppingPart n
-      isByzantine c = c <= '\x17f' || (c >= '\x590' && c <= '\x05ff') ||
-                      (c >= '\x400' && c <= '\x52f') || ( c >= '\x370' && c <= '\x3ff') ||
-                      (c >= '\x1f00' && c <= '\x1fff') || (c >= '\x0600' && c <= '\x200c') ||
-                      (c >= '\x200d' && c <= '\x200e') || (c >= '\x0218' && c <= '\x0219') ||
-                      (c >= '\x21a' && c <= '\x21b') || (c >= '\x202a' && c <= '\x202e')
+      -- see src/load.js ROMANESQUE_REGEX in citeproc-js:
+      isByzantine c = not (isLetter c) ||
+                      c <= '\x5FF' ||
+                      (c >= '\x1f00' && c <= '\x1fff')
       shortName = oPan' (unFormatted $ nondropping <+> family) (form "family")
       longName g = if isSorting m
                    then let firstPart = case getOptionVal "demote-non-dropping-particle" ops of
@@ -344,20 +343,16 @@ formatName m b f fm ops np n
 formatTerm :: Form -> Formatting -> Bool -> String -> State EvalState [Output]
 formatTerm f fm p s = do
   t <- getTerm p f s
-  pos <- gets (citePosition . cite . env)
-  let t' = if pos == "ibid-with-locator-c" || pos == "ibid-c"
-              then capitalize t
-              else t
-  return $ oStr' t' fm
+  return $ oStr' t fm
 
 formatLabel :: Form -> Formatting -> Bool -> String -> State EvalState [Output]
 formatLabel f fm p s
     | "locator" <- s = when' (gets (citeLocator . cite . env) >>= return . (/=) []) $ do
                        (l,v) <- getLocVar
-                       form (\fm' -> return . flip OLoc emptyFormatting . output fm') id l ('-' `elem` v)
+                       form (\fm' -> return . flip OLoc emptyFormatting . output fm') id l ('-' `elem` v || '\x2013' `elem` v)
     | "page"    <- s = checkPlural
     | "volume"  <- s = checkPlural
-    | "ibid"    <- s = format' s p
+    | "ibid"    <- s = format s p
     | isRole       s = do a <- getAgents' (if s == "editortranslator"
                                               then "editor"
                                               else s)
@@ -372,12 +367,8 @@ formatLabel f fm p s
                          ,"reviewed-author", "translator"]
       checkPlural = when' (isVarSet s) $ do
                       v <- getStringVar s
-                      format  s ('-' `elem` v)
+                      format  s ('-' `elem` v || '\x2013' `elem` v)
       format      = form output id
-      format' t b = gets (citePosition . cite . env) >>= \po ->
-                    if po == "ibid-with-locator-c" || po == "ibid-c"
-                    then form output capitalize t b
-                    else format t b
       form o g t b = return . o fm =<< g . period <$> getTerm (b && p) f t
       period      = if stripPeriods fm then filter (/= '.') else id
 

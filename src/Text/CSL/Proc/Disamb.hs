@@ -20,7 +20,7 @@ module Text.CSL.Proc.Disamb where
 
 import Control.Arrow ( (&&&), (>>>), second )
 import Data.Char ( chr )
-import Data.List ( elemIndex, elemIndices, find, findIndex, sortBy, mapAccumL
+import Data.List ( elemIndex, find, findIndex, sortBy, mapAccumL
                  , nub, nubBy, groupBy, isPrefixOf )
 import Data.Maybe
 import Data.Ord ( comparing )
@@ -60,7 +60,7 @@ disambCitations s bibs cs groups
                    then if isByCite then ByCite else AllNames
                    else NoGiven
 
-      clean     = if hasGNameOpt then id else proc rmNameHash . proc rmGivenNames
+      clean     = if hasGNameOpt then id else proc rmHashAndGivenNames
       withNames = flip map duplics $ same . clean .
                   map (if hasNamesOpt then disambData else return . disambYS)
 
@@ -111,7 +111,7 @@ data GiveNameDisambiguation
 disambAddNames :: GiveNameDisambiguation -> [CiteData] -> [CiteData]
 disambAddNames b needName = addLNames
     where
-      clean     = if b == NoGiven then proc rmNameHash . proc rmGivenNames else id
+      clean     = if b == NoGiven then proc rmHashAndGivenNames else id
       disSolved = zip needName' . disambiguate . map disambData $ needName'
       needName' = nub' needName []
       addLNames = map (\(c,n) -> c { disambed = if null n then collision c else head n }) disSolved
@@ -136,14 +136,14 @@ updateContrib g c n o
                                     | otherwise             -> o
     | otherwise = o
     where
-      clean         = if g == NoGiven then proc rmNameHash . proc rmGivenNames else id
+      clean         = if g == NoGiven then proc rmHashAndGivenNames else id
       processGNames = if g /= NoGiven then updateOName n else id
 
 updateOName :: [NameData] -> Output -> Output
 updateOName n o
     | OName _ _ [] _ <- o = o
     | OName k x _  f <- o = case elemIndex (ND k (clean x) [] []) n of
-                              Just i -> OName [] (nameDataSolved $ n !! i) [] f
+                              Just i -> OName emptyAgent (nameDataSolved $ n !! i) [] f
                               _      -> o
     | otherwise           = o
     where
@@ -189,18 +189,18 @@ getDuplCiteData b1 b2 g
       $ duplicates
     where
       whatToGet  = if b1 then collision else disambYS
-      collide    = proc rmExtras . proc rmNameHash . proc rmGivenNames . whatToGet
+      collide    = proc rmExtras . proc rmHashAndGivenNames . whatToGet
       citeData   = nubBy (\a b -> collide a == collide b && key a == key b) $
                    concatMap (mapGroupOutput $ getCiteData) g
-      findDupl f = filter (flip (>) 1 . length . flip elemIndices (map f citeData) . f) citeData
-      duplicates = if b2 then findDupl (collide &&& citYear)
-                         else findDupl  collide
+      duplicates = [c | c <- citeData , d <- citeData , collides c d]
+      collides x y = x /= y && (collide x == collide y)
+                            && (not b2 || citYear x == citYear y)
 
 rmExtras :: [Output] -> [Output]
 rmExtras os
-    | Output         x f : xs <- os = case rmExtras x of
+    | Output         x _ : xs <- os = case rmExtras x of
                                            [] -> rmExtras xs
-                                           ys -> Output ys f : rmExtras xs
+                                           ys -> ys ++ rmExtras xs
     | OContrib _ _ x _ _ : xs <- os = OContrib [] [] x [] [] : rmExtras xs
     | OYear        y _ f : xs <- os = OYear y [] f : rmExtras xs
     | ODel             _ : xs <- os = rmExtras xs
@@ -220,8 +220,9 @@ getCiteData out
                         [] -> [CD [] [out] [] [] [] [] []]
                               -- allow title to disambiguate
                         xs -> xs
-      yearsQ  = query getYears
-      years o = if yearsQ o /= [] then yearsQ o else [([],[])]
+      years o = case query getYears o of
+                     []    -> [([],[])]
+                     r     -> r
       zipData = uncurry . zipWith $ \c y -> if key c /= []
                                             then c {citYear = snd y}
                                             else c {key     = fst y
@@ -387,16 +388,14 @@ hasYearSuf = not . null . query getYearSuf
               | OYearSuf _ _ _ _ <- o = ["a"]
               | otherwise             = []
 
--- | Removes all given names form a 'OName' element with 'proc'.
-rmGivenNames :: Output -> Output
-rmGivenNames o
-    | OName i s _ f <- o = OName i s [] f
-    | otherwise          = o
+-- | Removes all given names and name hashes from OName elements.
+rmHashAndGivenNames :: Output -> Output
+rmHashAndGivenNames (OName _ s _ f) = OName emptyAgent s [] f
+rmHashAndGivenNames o = o
 
-rmNameHash :: Output -> Output
-rmNameHash o
-    | OName _ s ss f <- o = OName [] s ss f
-    | otherwise           = o
+rmGivenNames :: Output -> Output
+rmGivenNames (OName a s _ f) = OName a s [] f
+rmGivenNames o = o
 
 -- | Add, with 'proc', a give name to the family name. Needed for
 -- disambiguation.

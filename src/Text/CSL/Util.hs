@@ -40,22 +40,25 @@ module Text.CSL.Util
   , toCapital
   , mapHeadInline
   , tr'
+  , findFile
   ) where
 import Data.Aeson
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Applicative ((<$>), (<$), (<*>), pure)
+import Control.Applicative ((<$>), (<*>), pure)
 import Data.Char (toLower, toUpper, isLower, isUpper, isPunctuation)
 import qualified Data.Traversable
 import Text.Pandoc.Shared (safeRead, stringify)
 import Text.Pandoc.Walk (walk)
 import Text.Pandoc
-import Data.List.Split (wordsBy, whenElt, dropBlanks, split )
+import Data.List.Split (wordsBy)
 import Control.Monad.State
 import Data.Monoid (Monoid, mappend, mempty)
 import Data.Generics ( Typeable, Data, everywhere, everywhereM, mkM,
                        everywhere', everything, mkT, mkQ )
+import System.FilePath
+import System.Directory (doesFileExist)
 import qualified Debug.Trace
 
 readNum :: String -> Int
@@ -126,7 +129,7 @@ parseString (Number n) = case fromJSON (Number n) of
                                             Error e -> fail $ "Could not read string: " ++ e
 parseString (Bool b)   = return $ map toLower $ show b
 parseString v@(Array _)= inlinesToString `fmap` parseJSON v
-parseString _          = fail "Could not read string"
+parseString v          = fail $ "Could not read as string: " ++ show v
 
 -- | Parse JSON value as Int.
 parseInt :: Value -> Parser Int
@@ -163,70 +166,100 @@ splitUpStr :: [Inline] -> [Inline]
 splitUpStr = splitStrWhen (\c -> isPunctuation c || c == '\160')
 
 unTitlecase :: [Inline] -> [Inline]
-unTitlecase zs = evalState (caseTransform untc $ splitUpStr zs) SentenceBoundary
-  where untc (Str (x:xs))
-          | isUpper x = Str (toLower x : xs)
-        untc (Span ("",[],[]) xs)
-          | hasLowercaseWord xs = Span ("",["nocase"],[]) xs
-        untc x = x
+unTitlecase zs = evalState (caseTransform untc zs) SentenceBoundary
+  where untc w = do
+          st <- get
+          case (w, st) of
+               (y, NoBoundary) -> return y
+               (Str (x:xs), WordBoundary) | isUpper x ->
+                 return $ Str (toLower x : xs)
+               (Str (x:xs), SentenceBoundary) | isLower x ->
+                 return $ Str (toUpper x : xs)
+               (Span ("",[],[]) xs, _) | hasLowercaseWord xs ->
+                 return $ Span ("",["nocase"],[]) xs
+               _ -> return w
 
 protectCase :: [Inline] -> [Inline]
-protectCase zs = evalState (caseTransform protect $ splitUpStr zs) SentenceBoundary
+protectCase zs = evalState (caseTransform protect zs) SentenceBoundary
   where protect (Span ("",[],[]) xs)
-          | hasLowercaseWord xs = Span ("",["nocase"],[]) xs
-        protect x = x
+          | hasLowercaseWord xs = do
+            st <- get
+            case st of
+                 NoBoundary -> return $ Span ("",[],[]) xs
+                 _          -> return $ Span ("",["nocase"],[]) xs
+        protect x = return x
 
 titlecase :: [Inline] -> [Inline]
-titlecase zs = evalState (caseTransform tc $ splitUpStr zs) SentenceBoundary
-  where tc (Str (x:xs))
-          | isLower x && not (isShortWord (x:xs)) = Str (toUpper x : xs)
-          where isShortWord  s = s `elem`
-                      ["a","an","and","as","at","but","by","d","de"
-                      ,"down","for","from"
+titlecase zs = evalState (caseTransform tc zs) SentenceBoundary
+  where tc (Str (x:xs)) = do
+          st <- get
+          return $ case st of
+                        WordBoundary -> if isShortWord (x:xs)
+                                           then Str (x:xs)
+                                                -- or? map toLower (x:xs)
+                                           else Str (toUpper x : xs)
+                        SentenceBoundary -> Str (toUpper x : xs)
+                        _ -> Str (x:xs)
+        tc (Span ("",["nocase"],[]) xs) = return $ Span ("",["nocase"],[]) xs
+        tc x = return x
+        isShortWord  s = map toLower s `elem`
+                      ["a","an","and","as","at","but","by","c","ca","d","de"
+                      ,"down","et","for","from"
                       ,"in","into","nor","of","on","onto","or","over","so"
                       ,"the","till","to","up","van","von","via","with","yet"]
-        tc (Span ("",["nocase"],[]) xs) = Span ("",["nocase"],[]) xs
-        tc x = x
 
 data CaseTransformState = WordBoundary | SentenceBoundary | NoBoundary
 
-caseTransform :: (Inline -> Inline) -> [Inline]
+caseTransform :: (Inline -> State CaseTransformState Inline) -> [Inline]
               -> State CaseTransformState [Inline]
-caseTransform xform = mapM go
-  where go Space            = Space <$ modify (\st ->
-                                case st of
-                                     SentenceBoundary -> SentenceBoundary
-                                     _                -> WordBoundary)
-        go LineBreak        = Space <$ put WordBoundary
-        go (Str "’")        = return $ Str "’"
-        go (Str [x])
-          | x `elem` "?!:"  = (Str [x]) <$ put SentenceBoundary
-          | isPunctuation x || x == '\160' = (Str [x]) <$ put WordBoundary
-        go (Str [])         = return $ Str []
-        go (Str (x:xs)) = do
-               st <- get
+caseTransform xform = fmap reverse . foldM go [] . splitUpStr
+  where go acc Space        = do
+               modify (\st ->
+                 case st of
+                      SentenceBoundary -> SentenceBoundary
+                      _                ->
+                          case acc of
+                                (Str [x]:_)
+                                  | x `elem` "?!:"   -> SentenceBoundary
+                                _                    -> WordBoundary)
+               return $ Space : acc
+        go acc LineBreak = do
+               put WordBoundary
+               return $ Space : acc
+        go acc (Str [c])
+          | c `elem` "-\2013\2014\160" = do
+               put WordBoundary
+               return $ Str [c] : acc
+          | isPunctuation c = do
+               -- leave state unchanged
+               return $ Str [c] : acc
+        go acc (Str []) = return acc
+        go acc (Str xs) = do
+               res <- xform (Str xs)
                put NoBoundary
-               return $ case st of
-                  WordBoundary -> xform $ Str (x:xs)
-                  _            -> Str (x:xs)
-        go (Span ("",classes,[]) xs) | null classes || classes == ["nocase"] =
-            do st <- get
+               return $ res : acc
+        go acc (Span ("",classes,[]) xs)
+          | null classes || classes == ["nocase"] = do
+               res <- xform (Span ("",classes,[]) xs)
                put NoBoundary
-               return $ case st of
-                  WordBoundary -> xform (Span ("",classes,[]) xs)
-                  _            -> (Span ("",classes,[]) xs)
-        go (Quoted qt xs)   = Quoted qt <$> caseTransform xform xs
-        go (Emph xs)        = Emph <$> caseTransform xform xs
-        go (Strong xs)      = Strong <$> caseTransform xform xs
-        go (Link xs t)      = Link <$> caseTransform xform xs <*> pure t
-        go (Image _attr xs t)     = Link <$> caseTransform xform xs <*> pure t
-        go (Span attr xs)   = Span attr <$> caseTransform xform xs
-        go x = return x
+               return $ res : acc
+        go acc (Quoted qt xs)    = (:acc) <$> (Quoted qt <$> caseTransform xform xs)
+        go acc (Emph xs)         = (:acc) <$> (Emph <$> caseTransform xform xs)
+        go acc (Strong xs)       = (:acc) <$> (Strong <$> caseTransform xform xs)
+        go acc (Link xs t)       = (:acc) <$> (Link <$> caseTransform xform xs <*> pure t)
+        go acc (Image _ xs t)    = (:acc) <$> (Link <$> caseTransform xform xs <*> pure t)
+        go acc (Span attr xs)    = (:acc) <$> (Span attr <$> caseTransform xform xs)
+        go acc x                 = return $ x : acc
 
 splitStrWhen :: (Char -> Bool) -> [Inline] -> [Inline]
 splitStrWhen _ [] = []
-splitStrWhen p (Str xs : ys)
-  | any p xs = map Str ((split . dropBlanks) (whenElt p) xs) ++ splitStrWhen p ys
+splitStrWhen p (Str xs : ys) = go xs ++ splitStrWhen p ys
+  where go [] = []
+        go s = case break p s of
+                     ([],[])     -> []
+                     (zs,[])     -> [Str zs]
+                     ([],(w:ws)) -> Str [w] : go ws
+                     (zs,(w:ws)) -> Str zs : Str [w] : go ws
 splitStrWhen p (x : ys) = x : splitStrWhen p ys
 
 -- | A generic processing function.
@@ -305,7 +338,8 @@ tailFirstInlineStr :: [Inline] -> [Inline]
 tailFirstInlineStr = mapHeadInline (drop 1)
 
 toCapital :: [Inline] -> [Inline]
-toCapital = mapHeadInline capitalize
+toCapital ils@(Span (_,["nocase"],_) _:_) = ils
+toCapital ils = mapHeadInline capitalize ils
 
 mapHeadInline :: (String -> String) -> [Inline] -> [Inline]
 mapHeadInline _ [] = []
@@ -325,3 +359,12 @@ mapHeadInline f (i:xs)
 
 tr' :: Show a => String -> a -> a
 tr' note' x = Debug.Trace.trace (note' ++ ": " ++ show x) x
+
+findFile :: [FilePath] -> FilePath -> IO (Maybe FilePath)
+findFile [] _ = return Nothing
+findFile (p:ps) f = do
+  exists <- doesFileExist (p </> f)
+  if exists
+     then return $ Just (p </> f)
+     else findFile ps f
+

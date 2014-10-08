@@ -15,28 +15,94 @@
 --
 -----------------------------------------------------------------------------
 
-module Text.CSL.Style where
+module Text.CSL.Style ( readCSLString
+                      , writeCSLString
+                      , Formatted(..)
+                      , Style(..)
+                      , Locale(..)
+                      , mergeLocales
+                      , CslTerm(..)
+                      , newTerm
+                      , findTerm
+                      , findTerm'
+                      , Abbreviations(..)
+                      , MacroMap
+                      , Citation(..)
+                      , Bibliography(..)
+                      , Option
+                      , mergeOptions
+                      , Layout(..)
+                      , Element(..)
+                      , IfThen(..)
+                      , Condition(..)
+                      , Delimiter
+                      , Match(..)
+                      , match
+                      , DatePart(..)
+                      , defaultDate
+                      , Sort(..)
+                      , Sorting(..)
+                      , compare'
+                      , Form(..)
+                      , Gender(..)
+                      , NumericForm(..)
+                      , DateForm(..)
+                      , Plural(..)
+                      , Name(..)
+                      , NameAttrs
+                      , NamePart(..)
+                      , isPlural
+                      , isName
+                      , isNames
+                      , hasEtAl
+                      , Formatting(..)
+                      , emptyFormatting
+                      , rmTitleCase
+                      , Quote(..)
+                      , unsetAffixes
+                      , mergeFM
+                      , CSInfo(..)
+                      , CSAuthor(..)
+                      , CSCategory(..)
+                      , CiteprocError(..)
+                      , Output(..)
+                      , Citations
+                      , Cite(..)
+                      , emptyCite
+                      , CitationGroup(..)
+                      , BiblioData(..)
+                      , CiteData(..)
+                      , NameData(..)
+                      , isPunctuationInQuote
+                      , object'
+                      , Agent(..)
+                      , emptyAgent
+                      )
+where
 
 import Data.Aeson hiding (Number)
 import GHC.Generics (Generic)
 import Data.String
-import Data.Monoid (mempty, Monoid, mappend, mconcat)
+import Data.Monoid (mempty, Monoid, mappend, mconcat, (<>))
 import Control.Arrow hiding (left, right)
 import Control.Applicative hiding (Const)
-import Data.List ( nubBy, isPrefixOf, isInfixOf, intercalate )
-import Data.List.Split ( splitWhen )
+import qualified Data.Aeson as Aeson
+import Data.Aeson.Types (Pair)
+import Data.List ( nubBy, isPrefixOf, isInfixOf, intersperse, intercalate )
+import Data.List.Split ( splitWhen, wordsBy )
 import Data.Generics ( Data, Typeable )
 import Data.Maybe ( listToMaybe )
 import qualified Data.Map as M
-import Data.Char (isPunctuation)
-import Text.CSL.Util (mb, parseBool, parseString, (.#?), (.#:), proc', query,
-                      betterThan, trimr, tailInline, headInline, initInline,
-                      lastInline)
+import Data.Char (isPunctuation, isUpper, isLetter)
+import Text.CSL.Util (mb, parseBool, parseString, (.#?), (.#:), query,
+                      betterThan, trimr, tailInline, headInline,
+                      initInline, lastInline, splitStrWhen)
 import Text.Pandoc.Definition hiding (Citation, Cite)
 import Text.Pandoc (readHtml, writeMarkdown, WriterOptions(..),
                     ReaderOptions(..), bottomUp, def)
 import qualified Text.Pandoc.Walk as Walk
 import qualified Text.Pandoc.Builder as B
+import qualified Data.Text as T
 import Text.Pandoc.XML (fromEntities)
 
 #ifdef UNICODE_COLLATION
@@ -46,13 +112,6 @@ import qualified Data.Text.ICU as T
 import Data.RFC5051 (compareUnicode)
 #endif
 import qualified Data.Vector as V
-#ifdef USE_NETWORK
-#endif
-
--- import Debug.Trace
---
--- tr' :: Show a => [Char] -> a -> a
--- tr' note' x = Debug.Trace.trace (note' ++ ": " ++ show x) x
 
 -- Note:  FromJSON reads HTML, ToJSON writes Markdown.
 -- This means that they aren't proper inverses of each other, which
@@ -61,13 +120,22 @@ import qualified Data.Vector as V
 -- pandoc metadata bibliographies.
 
 readCSLString :: String -> [Inline]
-readCSLString s = case readHtml def{ readerSmart = True
+readCSLString s = Walk.walk handleSmallCapsSpans
+                $ case readHtml def{ readerSmart = True
                                    , readerParseRaw = True }
                                 (adjustScTags s) of
                         Pandoc _ [Plain ils]   -> ils
                         Pandoc _ [Para  ils]   -> ils
                         Pandoc _ x             -> Walk.query (:[]) x
+  -- this is needed for versions of pandoc that don't turn
+  -- a span with font-variant:small-caps into a SmallCaps element:
+  where handleSmallCapsSpans (Span ("",[],[("style",sty)]) ils)
+            | filter (`notElem` " \t;") sty == "font-variant:small-caps" =
+              SmallCaps ils
+        handleSmallCapsSpans x = x
 
+-- <sc> is not a real HTML tag, but a CSL convention.  So we
+-- replace it with a real tag that the HTML reader will understand.
 adjustScTags :: String -> String
 adjustScTags zs =
   case zs of
@@ -101,10 +169,12 @@ adjustCSL x = [x]
 -- We use a newtype wrapper so we can have custom ToJSON, FromJSON
 -- instances.
 newtype Formatted = Formatted { unFormatted :: [Inline] }
-  deriving ( Show, Read, Eq, Data, Typeable, Generic )
+  deriving ( Show, Read, Eq, Ord, Data, Typeable, Generic )
 
 instance FromJSON Formatted where
-  parseJSON v@(Array _) = Formatted <$> parseJSON v
+  parseJSON v@(Array _) =
+   Formatted <$> (parseJSON v
+             <|> ((query (:[]) :: [Block] -> [Inline]) <$> parseJSON v))
   parseJSON v           = fmap (Formatted . readCSLString) $ parseString v
 
 instance ToJSON Formatted where
@@ -136,7 +206,7 @@ appendWithPunct :: Formatted -> Formatted -> Formatted
 appendWithPunct (Formatted left) (Formatted right) =
   Formatted $
   case concat [lastleft, firstright] of
-       [' ',d] | d `elem` ",.:;" -> initInline left ++ tailInline right
+       [' ',d] | d `elem` ",.:;" -> initInline left ++ right
        [c,d] | c `elem` " ,.:;", d == c -> left ++ tailInline right
        [c,'.'] | c `elem` ",.!:;?" -> left ++ tailInline right
        [c,':'] | c `elem` ",!:;?" -> left ++ tailInline right  -- Mich.: 2005
@@ -217,22 +287,20 @@ findTerm' :: String -> Form -> Gender -> [CslTerm] -> Maybe CslTerm
 findTerm' s f g
     = listToMaybe . filter (cslTerm &&& termForm &&& termGenderForm >>> (==) (s,(f,g)))
 
-hasOrdinals :: Data a => a -> Bool
-hasOrdinals = or . query hasOrd
+hasOrdinals :: [Locale] -> Bool
+hasOrdinals = any (any hasOrd . localeTerms)
     where
       hasOrd o
           | CT {cslTerm = t} <- o
-          , "ordinal" `isInfixOf` t = [True]
-          | otherwise               = [False]
+          , "ordinal" `isInfixOf` t = True
+          | otherwise               = False
 
-rmOrdinals :: Data a => a -> a
-rmOrdinals = proc' doRemove
-    where
-      doRemove [] = []
-      doRemove (o:os)
-          | CT {cslTerm = t} <- o
-          , "ordinal" `isInfixOf` t =   doRemove os
-          | otherwise               = o:doRemove os
+rmOrdinals :: [CslTerm] -> [CslTerm]
+rmOrdinals [] = []
+rmOrdinals (o:os)
+  | CT {cslTerm = t} <- o
+  , "ordinal" `isInfixOf` t =   rmOrdinals os
+  | otherwise               = o:rmOrdinals os
 
 newtype Abbreviations = Abbreviations {
            unAbbreviations :: M.Map String (M.Map String (M.Map String String))
@@ -283,7 +351,6 @@ data Element
     | Names       [String]   [Name]       Formatting Delimiter [Element]
     | Substitute  [Element]
     | Group        Formatting Delimiter  [Element]
-    | Elements     Formatting            [Element]
     | Date        [String]    DateForm    Formatting Delimiter [DatePart] String
       deriving ( Show, Read, Eq, Typeable, Data, Generic )
 
@@ -426,10 +493,9 @@ isNames :: Element -> Bool
 isNames x = case x of Names {} -> True; _ -> False
 
 hasEtAl :: [Name] -> Bool
-hasEtAl = not . null . query getEtAl
-    where getEtAl n
-              | EtAl _ _ <- n = [n]
-              | otherwise     = []
+hasEtAl = any isEtAl
+    where isEtAl (EtAl _ _) = True
+          isEtAl _          = False
 
 data Formatting
     = Formatting
@@ -541,7 +607,7 @@ data Output
     | ODate   [Output]                                  -- ^ A (possibly) ranged date
     | OYear    String    String   Formatting            -- ^ The year and the citeId
     | OYearSuf String    String   [Output]   Formatting -- ^ The year suffix, the citeId and a holder for collision data
-    | OName    String   [Output] [[Output]]  Formatting -- ^ A (family) name with the list of given names.
+    | OName    Agent    [Output] [[Output]]  Formatting -- ^ A (family) name with the list of given names.
     | OContrib String    String   [Output] [Output] [[Output]] -- ^ The citation key, the role (author, editor, etc.), the contributor(s),
                                                         -- the output needed for year suf. disambiguation, and everything used for
                                                         -- name disambiguation.
@@ -623,7 +689,7 @@ instance Eq CiteData where
 
 data NameData
     = ND
-      { nameKey        ::   String
+      { nameKey        ::  Agent
       , nameCollision  ::  [Output]
       , nameDisambData :: [[Output]]
       , nameDataSolved ::  [Output]
@@ -632,3 +698,132 @@ data NameData
 instance Eq NameData where
     (==) (ND ka ca _ _)
          (ND kb cb _ _) = ka == kb && ca == cb
+
+isPunctuationInQuote :: Style -> Bool
+isPunctuationInQuote sty =
+  case styleLocale sty of
+       (l:_) -> ("punctuation-in-quote","true") `elem` localeOptions l
+       _     -> False
+
+object' :: [Pair] -> Aeson.Value
+object' = object . filter (not . isempty)
+  where isempty (_, Array v)  = V.null v
+        isempty (_, String t) = T.null t
+        isempty ("first-reference-note-number", Aeson.Number n) = n == 0
+        isempty ("citation-number", Aeson.Number n) = n == 0
+        isempty (_, _)        = False
+
+data Agent
+    = Agent { givenName       :: [Formatted]
+            , droppingPart    :: Formatted
+            , nonDroppingPart :: Formatted
+            , familyName      :: Formatted
+            , nameSuffix      :: Formatted
+            , literal         :: Formatted
+            , commaSuffix     :: Bool
+            , parseNames      :: Bool
+            }
+      deriving ( Show, Read, Eq, Ord, Typeable, Data, Generic )
+
+emptyAgent :: Agent
+emptyAgent = Agent [] mempty mempty mempty mempty mempty False False
+
+instance FromJSON Agent where
+  parseJSON (Object v) = nameTransform <$> (Agent <$>
+              (v .: "given" <|> ((map Formatted . wordsBy (== Space) . unFormatted) <$> v .: "given") <|> pure []) <*>
+              v .:?  "dropping-particle" .!= mempty <*>
+              v .:? "non-dropping-particle" .!= mempty <*>
+              v .:? "family" .!= mempty <*>
+              v .:? "suffix" .!= mempty <*>
+              v .:? "literal" .!= mempty <*>
+              v .:? "comma-suffix" .!= False <*>
+              v .:? "parse-names" .!= True)
+  parseJSON _ = fail "Could not parse Agent"
+
+-- See http://gsl-nagoya-u.net/http/pub/citeproc-doc.html#id28
+nameTransform :: Agent -> Agent
+nameTransform ag
+  | parseNames ag = nonDroppingPartTransform .
+                    droppingPartTransform .
+                    suffixTransform $ ag
+  | otherwise = ag
+
+nonDroppingPartTransform :: Agent -> Agent
+nonDroppingPartTransform ag
+  | nonDroppingPart ag == mempty =
+    case break startWithCapital' (unFormatted $ familyName ag) of
+         ([], _)  -> ag
+         (xs, ys) -> ag { nonDroppingPart = Formatted $ trimSpace xs,
+                          familyName = Formatted ys }
+  | otherwise = ag
+
+trimSpace :: [Inline] -> [Inline]
+trimSpace = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+  where isSpace Space = True
+        isSpace _     = False
+
+droppingPartTransform :: Agent -> Agent
+droppingPartTransform ag
+  | droppingPart ag == mempty =
+    case break startWithCapital $ reverse $ givenName ag of
+          ([],_)  -> ag
+          (ys,zs) -> ag{ droppingPart = mconcat $
+                                         intersperse (Formatted [Space]) $
+                                         reverse ys
+                       , givenName = reverse zs }
+  | otherwise = ag
+
+startWithCapital' :: Inline -> Bool
+startWithCapital' (Str (c:_)) = isUpper c && isLetter c
+startWithCapital' _ = False
+
+startWithCapital :: Formatted -> Bool
+startWithCapital (Formatted (x:_)) = startWithCapital' x
+startWithCapital _ = False
+
+stripFinalComma :: Formatted -> (String, Formatted)
+stripFinalComma (Formatted ils) =
+  case reverse $ splitStrWhen isPunctuation ils of
+       Str ",":xs -> (",", Formatted $ reverse xs)
+       Str "!":Str ",":xs -> (",!", Formatted $ reverse xs)
+       _ -> ("", Formatted ils)
+
+suffixTransform :: Agent -> Agent
+suffixTransform ag
+  | nameSuffix ag == mempty = fst $ foldl go
+                              (ag{ givenName   = mempty
+                                 , nameSuffix  = mempty
+                                 , commaSuffix = False }, False)
+                              (givenName ag)
+  | otherwise = ag
+  where go (ag', False) n =
+               case stripFinalComma n of
+                    ("", _)   -> (ag'{ givenName = givenName ag' ++ [n] }, False)
+                    (",",n')  -> (ag'{ givenName = givenName ag' ++ [n'] }, True)
+                    (",!",n') -> (ag'{ givenName = givenName ag' ++ [n']
+                                     , commaSuffix = True }, True)
+                    _         -> error "stripFinalComma returned unexpected value"
+        go (ag', True) n = (ag'{ nameSuffix = if nameSuffix ag' == mempty
+                                                 then n
+                                                 else nameSuffix ag' <>
+                                                      Formatted [Space] <> n }, True)
+
+instance ToJSON Agent where
+  toJSON agent = object' $ [
+      "given" .= Formatted (intercalate [Space] $ map unFormatted
+                                                $ givenName agent)
+    , "dropping-particle" .= droppingPart agent
+    , "non-dropping-particle" .= nonDroppingPart agent
+    , "family" .= familyName agent
+    , "suffix" .= nameSuffix agent
+    , "literal" .= literal agent
+    ] ++ ["comma-suffix" .= commaSuffix agent | nameSuffix agent /= mempty]
+      ++ ["parse-names" .= False | not (parseNames agent) ]
+
+instance FromJSON [Agent] where
+  parseJSON (Array xs) = mapM parseJSON $ V.toList xs
+  parseJSON (Object v) = (:[]) `fmap` parseJSON (Object v)
+  parseJSON _ = fail "Could not parse [Agent]"
+
+-- instance ToJSON [Agent] where
+-- toJSON xs  = Array (V.fromList $ map toJSON xs)

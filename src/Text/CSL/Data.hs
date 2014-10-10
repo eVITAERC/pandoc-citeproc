@@ -24,7 +24,7 @@ import Data.Maybe (fromMaybe)
 import Text.CSL.Data.Embedded (localeFiles, defaultCSL)
 import qualified Data.ByteString as S
 #else
-import Paths_pandoc_citeproc (getDataFileName)
+import Paths_scholdoc_citeproc (getDataFileName)
 import System.Directory  (doesFileExist)
 #endif
 

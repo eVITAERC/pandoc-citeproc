@@ -22,7 +22,7 @@ import System.FilePath (takeExtension)
 import System.Environment (getArgs)
 import System.Exit
 import Data.Version (showVersion)
-import Paths_pandoc_citeproc (version)
+import Paths_scholdoc_citeproc (version)
 import Text.CSL.Pandoc (processCites')
 import Text.Pandoc.JSON hiding (Format)
 import Text.Pandoc.Walk

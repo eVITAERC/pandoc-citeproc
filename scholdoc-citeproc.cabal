@@ -1,4 +1,4 @@
-name:               pandoc-citeproc
+name:               scholdoc-citeproc
 version:            0.6
 cabal-version:      >= 1.12
 synopsis:           Supports using pandoc with citeproc
@@ -132,15 +132,15 @@ library
                       Text.CSL.Output.Plain
                       Text.CSL.Data
     other-modules:    Text.CSL.Util
-                      Paths_pandoc_citeproc
+                      Paths_scholdoc_citeproc
     ghc-options:      -funbox-strict-fields -Wall -fno-warn-unused-do-bind
     ghc-prof-options: -prof -auto-all
     build-depends:    containers, directory, mtl,
-                      bytestring, filepath, pandoc-types >= 1.12.3, tagsoup,
+                      bytestring, filepath, scholdoc-types >= 0.1.3, tagsoup,
                       aeson >= 0.7 && < 0.9, text, vector,
                       xml-conduit >= 1.2 && < 1.3,
                       data-default,
-                      split, yaml >= 0.8.8.2, pandoc >= 1.12.1
+                      split, yaml >= 0.8.8.2, scholdoc >= 0.1.3
     if impl(ghc < 7.6)
        build-depends: ghc-prim
 
@@ -169,12 +169,12 @@ library
 
     default-language: Haskell98
 
-executable pandoc-citeproc
-    main-is:          pandoc-citeproc.hs
+executable scholdoc-citeproc
+    main-is:          scholdoc-citeproc.hs
     hs-source-dirs:   .
     ghc-options:      -funbox-strict-fields -Wall
     ghc-prof-options: -prof -auto-all
-    build-depends:    base >= 4, pandoc-citeproc, pandoc-types >= 1.12.3, aeson,
+    build-depends:    base >= 4, scholdoc-citeproc, scholdoc-types >= 0.1.3, aeson,
                       aeson-pretty, yaml, bytestring, syb, attoparsec, text,
                       filepath
     default-language: Haskell98
@@ -188,8 +188,8 @@ executable test-citeproc
   else
     Buildable:    False
   build-depends:  base >= 4, aeson, directory, text,
-                  pandoc-types >= 1.12.3, pandoc >= 1.12.1, filepath,
-                  bytestring, pandoc-citeproc, process, temporary >= 1.1,
+                  scholdoc-types >= 0.1.3, scholdoc >= 0.1.3, filepath,
+                  bytestring, scholdoc-citeproc, process, temporary >= 1.1,
                   yaml >= 0.8.8.2, containers >= 0.4 && < 0.6,
                   vector >= 0.10 && < 0.11
   default-language: Haskell98
@@ -200,7 +200,7 @@ test-suite test-pandoc-citeproc
   Other-Modules:  JSON
   Hs-Source-Dirs: tests
   build-depends:  base >= 4, aeson, directory, text,
-                  pandoc-types >= 1.12.3, pandoc >= 1.12.1, filepath,
-                  bytestring, pandoc-citeproc, process, temporary >= 1.1,
+                  scholdoc-types >= 0.1.3, scholdoc >= 0.1.3, filepath,
+                  bytestring, scholdoc-citeproc, process, temporary >= 1.1,
                   yaml >= 0.8.8.2
   default-language: Haskell98

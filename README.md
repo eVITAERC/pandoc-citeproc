@@ -1,37 +1,42 @@
-pandoc-citeproc
-===============
+Scholdoc-Citeproc
+=================
 
-This package provides a library and executable to facilitate the use of
-citeproc with pandoc 1.12 and greater.  (Earlier versions of pandoc have
-integrated citeproc support.)
+### A fork of [Pandoc-Citeproc][pandoc-citeproc] for [Scholdoc][scholdoc]
 
-`pandoc-citeproc`
------------------
+**Current stable version:** 0.6
 
-The `pandoc-citeproc` executable can be used as a filter with pandoc to
-resolve and format citations using a bibliography file and a CSL
-stylesheet.  It can also be used (with `--bib2yaml` or `--bib2json`
-options) to convert a bibliography to a YAML format that can be put
-directly into a pandoc markdown document or to CSL JSON.  Bibliographies
-can be in any of several formats, but bibtex and biblatex are the best
-supported.
+**Development build status** [![build status][scholarly-devel-travisimage]][travis_stat]  
+**Stable build status** [![build status][scholarly-travisimage]][travis_stat]
 
-For usage and further details, see the [pandoc-citeproc man
-page](https://github.com/jgm/pandoc-citeproc/blob/master/man/pandoc-citeproc.1.md).
+This package is a fork of [Pandoc-Citeproc][pandoc-citeproc]. It is intended to
+support the development of [Scholdoc][scholdoc], a fork of [Pandoc][pandoc]
+that understands [ScholarlyMarkdown][scholmd]. It is mean to be used as a
+filter with [Scholdoc][scholdoc] to resolve and format citations using a
+bibliography file and a [CSL stylesheet][csl]. It can also be used (with
+`--bib2yaml` or `--bib2json` options) to convert a bibliography to a YAML
+format that can be put directly into a ScholarlyMarkdown document or to CSL
+JSON. Bibliographies can be in any of several formats, but BibTeX/BibLaTeX
+`.bib` database files are the best supported. For more information, consult the
+original README file of `pandoc-citeproc`, which is moved to
+[`README-pandoc-citeproc.md`][citeproc-readme-blob].
 
-The current version of the package includes code from citeproc-hs,
-which has not been updated for some time.  When citeproc-hs is brought
-up to date, this code can be removed and this package will depend
-on citeproc-hs.
+`scholdoc-citeproc` is currently just a trivial fork just so it can compile
+against [Scholdoc-Types][scholdoc-types] and [Scholdoc][scholdoc] instead of
+[Pandoc-Types][pandoc-types] and [Pandoc][pandoc], without polluting the
+`pandoc-citeproc` package and executable namespace on the user's system. In the
+future, enhancements and modifications made as part of the [Scholdoc][scholdoc]
+project will be introduced here first.
 
-`Text.CSL.Pandoc`
------------------
+The version number of this package is kept in sync with [pandoc-citeproc].
 
-Those who use pandoc as a library (e.g. in a web application) will
-need to use this module to process citations.
-
-The module exports two functions, `processCites`, which is pure and
-accepts a style and a list of references as arguments, and
-`processCites'`, which lives in the IO monad and derives the style
-and references from the document's metadata.
-
+[scholmd]: http://scholarlymarkdown.com
+[scholdoc]: https://github.com/timtylin/scholdoc
+[scholdoc-types]: https://github.com/timtylin/scholdoc-types
+[pandoc]: http://johnmacfarlane.net/pandoc/
+[pandoc-types]: https://github.com/jgm/pandoc-types
+[pandoc-citeproc]: https://github.com/jgm/pandoc-citeproc
+[travis_stat]: https://travis-ci.org/timtylin/scholdoc-citeproc
+[scholarly-devel-travisimage]: https://travis-ci.org/timtylin/scholdoc-citeproc.svg?branch=scholarly-devel
+[scholarly-travisimage]: https://travis-ci.org/timtylin/scholdoc-citeproc.svg?branch=scholarly
+[citeproc-readme-blob]: https://github.com/timtylin/scholdoc-citeproc/blob/scholarly-devel/README-pandoc-citeproc
+[csl]: http://citationstyles.org

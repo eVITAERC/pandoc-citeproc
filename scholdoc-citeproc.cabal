@@ -1,32 +1,26 @@
 name:               scholdoc-citeproc
 version:            0.6
 cabal-version:      >= 1.12
-synopsis:           Supports using pandoc with citeproc
-
-description:        The pandoc-citeproc library exports functions for
-                    using the citeproc system with pandoc.  It relies on
-                    citeproc-hs, a library for rendering
-                    bibliographic reference citations into a variety
-                    of styles using a macro language called Citation
-                    Style Language (CSL). More details on CSL can be
-                    found here: <http://citationstyles.org/>.
+synopsis:           Scholdoc fork of pandoc-citeproc
+description:        This package is a fork of @pandoc-citeproc@, intended to
+                    support the development of Scholdoc. It is currently just a
+                    trivial fork just so it can compile against
+                    @scholdoc-citeproc@ without polluting the @pandoc-citeproc@
+                    package and executable namespace.
                     .
-                    Currently this package includes a heavily revised
-                    copy of the citeproc-hs code. When citeproc-hs is
-                    updated to be compatible, this package will simply
-                    depend on citeproc-hs.
+                    This package is versioned identically to @pandoc-citeproc@.
                     .
-                    This package also contains an executable: pandoc-citeproc,
-                    which works as a pandoc filter (pandoc >= 1.12), and
-                    also has a mode for converting bibliographic databases
-                    a YAML format suitable for inclusion in pandoc YAML
-                    metadata.
+                    For descriptions of the original @pandoc-citeproc@ package,
+                    please visit
+                    <http://hackage.haskell.org/package/pandoc-citeproc>
 
 category:           Text
 license:            BSD3
 license-file:       LICENSE
-author:             John MacFarlane, Andrea Rossato
-maintainer:         jgm@berkeley.edu
+author:             Tim T.Y. Lin <timtylin@gmail.com>
+maintainer:         Tim T.Y. Lin <timtylin@gmail.com>
+homepage:           https://github.com/timtylin/scholdoc-citeproc
+bug-reports:        https://github.com/timtylin/scholdoc-citeproc/issues
 build-type:         Custom
 data-files:         chicago-author-date.csl
                     locales/locales-af-ZA.xml
@@ -85,12 +79,13 @@ data-files:         chicago-author-date.csl
                     tests/biblio2yaml/*.bibtex
                     -- documentation
                     README.md
-                    man/man1/pandoc-citeproc.1
+                    README-pandoc-citeproc.md
+                    man/man1/scholdoc-citeproc.1
                     changelog
 
 source-repository head
   type:          git
-  location:      git://github.com/jgm/pandoc-citeproc.git
+  location:      git://github.com/timtylin/scholdoc-citeproc.git
 
 flag small_base
   description: Choose the new smaller, split-up base package.
@@ -194,9 +189,9 @@ executable test-citeproc
                   vector >= 0.10 && < 0.11
   default-language: Haskell98
 
-test-suite test-pandoc-citeproc
+test-suite test-scholdoc-citeproc
   Type:           exitcode-stdio-1.0
-  Main-Is:        test-pandoc-citeproc.hs
+  Main-Is:        test-scholdoc-citeproc.hs
   Other-Modules:  JSON
   Hs-Source-Dirs: tests
   build-depends:  base >= 4, aeson, directory, text,

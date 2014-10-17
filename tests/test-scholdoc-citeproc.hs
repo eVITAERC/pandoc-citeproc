@@ -63,7 +63,7 @@ testCase csl = do
 
   (ec, jsonOut, errout) <- pipeProcess
                      (Just [("LANG","en_US.UTF-8"),("HOME",".")])
-                     "dist/build/pandoc-citeproc/pandoc-citeproc"
+                     "dist/build/scholdoc-citeproc/scholdoc-citeproc"
                      [] jsonIn
   if ec == ExitSuccess
      then do
@@ -83,7 +83,7 @@ testCase csl = do
 
 showDiff :: BL.ByteString -> BL.ByteString -> IO ()
 showDiff expected' result' =
-  withSystemTempDirectory "test-pandoc-citeproc-XXX" $ \fp -> do
+  withSystemTempDirectory "test-scholdoc-citeproc-XXX" $ \fp -> do
     let expectedf = fp </> "expected"
     let actualf   = fp </> "actual"
     BL.writeFile expectedf expected'
@@ -104,7 +104,7 @@ biblio2yamlTest fp = do
   let expected = BL.unlines yamllines
   (ec, result, errout) <- pipeProcess
                      (Just [("LANG","en_US.UTF-8"),("HOME",".")])
-                     "dist/build/pandoc-citeproc/pandoc-citeproc"
+                     "dist/build/scholdoc-citeproc/scholdoc-citeproc"
                      ["--bib2yaml", "-f", drop 1 $ takeExtension fp] bib
   if ec == ExitSuccess
      then do

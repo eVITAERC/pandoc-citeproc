@@ -1,39 +1,43 @@
-.TH "pandoc\-citeproc" "1" "2014-09-21" "0.6" ""
+.TH "scholdoc\-citeproc" "1" "2014-10-16" "0.6" ""
 .SH NAME
 .PP
-pandoc\-citeproc \- filter to resolve citations in a pandoc document.
+scholdoc\-citeproc \- filter to resolve citations in a Pandoc/Scholdoc
+document.
 .SH SYNOPSIS
 .PP
-pandoc\-citeproc [options] [file..]
+scholdoc\-citeproc [options] [file..]
 .SH DESCRIPTION
 .PP
-The \f[C]pandoc\-citeproc\f[] executable has two modes, filter mode and
-convert mode.
+Scholdoc\-citeproc is a fork of \f[C]pandoc\-citeproc\f[], meant to be
+used with Scholdoc instead of Pandoc.
+.PP
+The \f[C]scholdoc\-citeproc\f[] executable has two modes, filter mode
+and convert mode.
 .SS Filter mode
 .PP
 Run without options, it acts as a filter that takes a JSON\-encoded
-Pandoc document, formats citations and adds a bibliography, and returns
-a JSON\-encoded pandoc document.
+Pandoc/Scholdoc document, formats citations and adds a bibliography, and
+returns a JSON\-encoded scholdoc document.
 Citations will be resolved, and a bibliography will be appended to the
 end of the document (unless the \f[C]suppress\-bibliography\f[] metadata
 field is set to a true value).
 If you wish the bibliography to have a section header, put the section
 header at the end of your document.
-(See the \f[C]pandoc_markdown\f[] (5) man page under "Citations" for
-details on how to encode citations in pandoc\[aq]s markdown.)
+(See the \f[C]pandoc_markdown\f[] (5) man page under \[lq]Citations\[rq]
+for details on how to encode citations in pandoc's markdown.)
 .PP
-To process citations with pandoc, call pandoc\-citeproc as a filter:
+To process citations with scholdoc, call scholdoc\-citeproc as a filter:
 .IP
 .nf
 \f[C]
-pandoc\ \-\-filter\ pandoc\-citeproc\ input.md\ \-s\ \-o\ output.html
+scholdoc\ \-\-filter\ scholdoc\-citeproc\ input.md\ \-s\ \-o\ output.html
 \f[]
 .fi
 .PP
 The bibliography will be put into a pandoc \f[C]Div\f[] container with
 class \f[C]references\f[].
 .PP
-pandoc\-citeproc will look for the following metadata fields in the
+scholdoc\-citeproc will look for the following metadata fields in the
 input:
 .PP
 \f[C]bibliography\f[]: A path, or YAML list of paths, of bibliography
@@ -86,9 +90,9 @@ Simple tex math will also be parsed and rendered appropriately.
 \f[C]csl\f[] or \f[C]citation\-style\f[]: Path or URL of a CSL style
 file.
 If the file is not found relative to the working directory,
-pandoc\-citeproc will look in the \f[C]$HOME/.csl\f[] directory (or
+scholdoc\-citeproc will look in the \f[C]$HOME/.csl\f[] directory (or
 \f[C]C:\\Users\\USERNAME\\AppData\\Roaming\\csl\f[] in Windows 7).
-If this is left off, pandoc\-citeproc will look for
+If this is left off, scholdoc\-citeproc will look for
 \f[C]$HOME/.csl/chicago\-author\-date.csl\f[], and if this is not
 present, it will use its own version of
 \f[C]chicago\-author\-date.csl\f[].
@@ -119,14 +123,14 @@ be used by default.
 .SS Convert mode
 .PP
 If the option \f[C]\-\-bib2yaml\f[] or \f[C]\-\-bib2json\f[] is used,
-\f[C]pandoc\-citeproc\f[] will not process citations; instead, it will
+\f[C]scholdoc\-citeproc\f[] will not process citations; instead, it will
 treat its input (from stdin or files) as a bibliography and convert it
-either to a pandoc YAML metadata section, suitable for inclusion in a
-pandoc document (\f[C]\-\-bib2yaml\f[]), or as a CSL JSON bibliography,
-suitable for import to zotero (\f[C]\-\-bib2json\f[]).
+either to a scholdoc YAML metadata section, suitable for inclusion in a
+scholdoc document (\f[C]\-\-bib2yaml\f[]), or as a CSL JSON
+bibliography, suitable for import to zotero (\f[C]\-\-bib2json\f[]).
 .PP
 The \f[C]\-\-format\f[] option can be used to specify the bibliography
-format, though when files are used, \f[C]pandoc\-citeproc\f[] can
+format, though when files are used, \f[C]scholdoc\-citeproc\f[] can
 generally guess this from the extension.
 .PP
 This mode supersedes the old \f[C]biblio2yaml\f[] program.
@@ -163,11 +167,12 @@ Legal values are \f[C]biblatex\f[], \f[C]bibtex\f[], \f[C]ris\f[],
 .SS General
 .PP
 If you use a biblatex database, closely follow the specifications in the
-"Database Guide" section of the biblatex manual (currently 2.8a).
+\[lq]Database Guide\[rq] section of the biblatex manual (currently
+2.8a).
 .PP
 If you use a CSL\-YAML or CSL\-JSON database, or a CSL\-YAML metadata
-section in your markdown document, follow the "Citation Style Language
-1.0.1 Language Specification"
+section in your markdown document, follow the \[lq]Citation Style
+Language 1.0.1 Language Specification\[rq]
 (<http://citationstyles.org/downloads/specification.html>).
 Particularly relevant are
 <http://citationstyles.org/downloads/specification.html#appendix-iii-types>
@@ -175,7 +180,7 @@ Particularly relevant are
 fields) and
 <http://citationstyles.org/downloads/specification.html#appendix-iv-variables>
 (which does contain comments).
-.SS Titles: Title vs. Sentence Case
+.SS Titles: Title vs.\ Sentence Case
 .PP
 If you are using a bibtex or biblatex bibliography, then observe the
 following rules:
@@ -189,8 +194,8 @@ field in biblatex should be set to the relevant language.
 \f[C]UKenglish\f[].)
 .IP \[bu] 2
 As is standard with bibtex/biblatex, proper names should be protected
-with curly braces so that they won\[aq]t be lowercased in styles that
-call for sentence case.
+with curly braces so that they won't be lowercased in styles that call
+for sentence case.
 For example:
 .RS 2
 .IP
@@ -214,8 +219,8 @@ title\ =\ {Spin\ Wave\ Dispersion\ on\ the\ {nm}\ Scale}
 Though this is not necessary in bibtex/biblatex, it is necessary with
 citeproc, which stores titles internally in sentence case, and converts
 to title case in styles that require it.
-Here we protect "nm" so that it doesn\[aq]t get converted to "Nm" at
-this stage.
+Here we protect \[lq]nm\[rq] so that it doesn't get converted to
+\[lq]Nm\[rq] at this stage.
 .RE
 .PP
 If you are using a CSL bibliography (either JSON or YAML), then observe
@@ -238,7 +243,7 @@ Spin\ wave\ dispersion\ on\ the\ <span\ class="nocase">nm</span>\ scale
 \f[]
 .fi
 .RE
-.SS Conference Papers, Published vs. Unpublished
+.SS Conference Papers, Published vs.\ Unpublished
 .PP
 For a formally published conference paper, use the biblatex entry type
 \f[C]inproceedings\f[] (which will be mapped to CSL
@@ -253,18 +258,19 @@ use the biblatex entry type \f[C]unpublished\f[] with an
 \f[C]eventtitle\f[] field (this entry type will be mapped to CSL
 \f[C]speech\f[]).
 Use the biblatex \f[C]type\f[] field to indicate the type, e.g.
-"Paper", or "Poster".
+\[lq]Paper\[rq], or \[lq]Poster\[rq].
 \f[C]venue\f[] and \f[C]eventdate\f[] may be useful too, though
 \f[C]eventdate\f[] will not be rendered by most CSL styles.
-Note that \f[C]venue\f[] is for the event\[aq]s venue, unlike
-\f[C]location\f[] which describes the publisher\[aq]s location; do not
-use the latter for an unpublished conference paper.
+Note that \f[C]venue\f[] is for the event's venue, unlike
+\f[C]location\f[] which describes the publisher's location; do not use
+the latter for an unpublished conference paper.
 .SH AUTHORS
 .PP
-Andrea Rossato and John MacFarlane.
+Andrea Rossato, John MacFarlane, and Tim T.Y.
+Lin.
 .SH SEE ALSO
 .PP
-\f[C]pandoc\f[] (1), \f[C]pandoc_markdown\f[] (5).
+\f[C]scholdoc\f[] (1), \f[C]pandoc_markdown\f[] (5).
 .PP
-The pandoc\-citeproc source code and all documentation may be downloaded
-from <http://github.com/jgm/pandoc-citeproc/>.
+The scholdoc\-citeproc source code and all documentation may be
+downloaded from <http://github.com/timtylin/scholdoc-citeproc/>.

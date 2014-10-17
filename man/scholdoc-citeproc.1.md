@@ -1,39 +1,42 @@
 ---
-title: pandoc-citeproc
+title: scholdoc-citeproc
 section: 1
 ...
 
 # NAME
 
-pandoc-citeproc - filter to resolve citations in a pandoc document.
+scholdoc-citeproc - filter to resolve citations in a Pandoc/Scholdoc document.
 
 # SYNOPSIS
 
-pandoc-citeproc [options] [file..]
+scholdoc-citeproc [options] [file..]
 
 # DESCRIPTION
 
-The `pandoc-citeproc` executable has two modes, filter mode and convert mode.
+Scholdoc-citeproc is a fork of `pandoc-citeproc`, meant to be used with
+Scholdoc instead of Pandoc.
+
+The `scholdoc-citeproc` executable has two modes, filter mode and convert mode.
 
 ## Filter mode
 
-Run without options, it acts as a filter that takes a JSON-encoded Pandoc
-document, formats citations and adds a bibliography, and returns a JSON-encoded
-pandoc document.  Citations will be resolved, and a bibliography will be
-appended to the end of the document (unless the `suppress-bibliography`
-metadata field is set to a true value).  If you wish the bibliography to
-have a section header, put the section header at the end of your
-document.  (See the `pandoc_markdown` (5) man page under "Citations"
-for details on how to encode citations in pandoc's markdown.)
+Run without options, it acts as a filter that takes a JSON-encoded
+Pandoc/Scholdoc document, formats citations and adds a bibliography, and
+returns a JSON-encoded scholdoc document. Citations will be resolved, and a
+bibliography will be appended to the end of the document (unless the
+`suppress-bibliography` metadata field is set to a true value). If you wish the
+bibliography to have a section header, put the section header at the end of
+your document. (See the `pandoc_markdown` (5) man page under "Citations" for
+details on how to encode citations in pandoc's markdown.)
 
-To process citations with pandoc, call pandoc-citeproc as a filter:
+To process citations with scholdoc, call scholdoc-citeproc as a filter:
 
-    pandoc --filter pandoc-citeproc input.md -s -o output.html
+    scholdoc --filter scholdoc-citeproc input.md -s -o output.html
 
 The bibliography will be put into a pandoc `Div` container with
 class `references`.
 
-pandoc-citeproc will look for the following metadata fields in
+scholdoc-citeproc will look for the following metadata fields in
 the input:
 
 `bibliography`:  A path, or YAML list of paths, of bibliography
@@ -75,9 +78,9 @@ parsed and rendered appropriately.
 
 `csl` or `citation-style`: Path or URL of a CSL style file.
 If the file is not found relative to the working directory,
-pandoc-citeproc will look in the `$HOME/.csl` directory (or
+scholdoc-citeproc will look in the `$HOME/.csl` directory (or
 `C:\Users\USERNAME\AppData\Roaming\csl` in Windows 7).  If this is left
-off, pandoc-citeproc will look for `$HOME/.csl/chicago-author-date.csl`,
+off, scholdoc-citeproc will look for `$HOME/.csl/chicago-author-date.csl`,
 and if this is not present, it will use its own version of
 `chicago-author-date.csl`.
 
@@ -100,14 +103,14 @@ used by default.
 
 ## Convert mode
 
-If the option `--bib2yaml` or `--bib2json` is used, `pandoc-citeproc` will
+If the option `--bib2yaml` or `--bib2json` is used, `scholdoc-citeproc` will
 not process citations; instead, it will treat its input (from stdin or
-files) as a bibliography and convert it either to a pandoc YAML metadata
-section, suitable for inclusion in a pandoc document (`--bib2yaml`), or
+files) as a bibliography and convert it either to a scholdoc YAML metadata
+section, suitable for inclusion in a scholdoc document (`--bib2yaml`), or
 as a CSL JSON bibliography, suitable for import to zotero (`--bib2json`).
 
 The `--format` option can be used to specify the bibliography format,
-though when files are used, `pandoc-citeproc` can generally guess this
+though when files are used, `scholdoc-citeproc` can generally guess this
 from the extension.
 
 This mode supersedes the old `biblio2yaml` program.
@@ -207,11 +210,11 @@ location; do not use the latter for an unpublished conference paper.
 
 # AUTHORS
 
-Andrea Rossato and John MacFarlane.
+Andrea Rossato, John MacFarlane, and Tim T.Y. Lin.
 
 # SEE ALSO
 
-`pandoc` (1), `pandoc_markdown` (5).
+`scholdoc` (1), `pandoc_markdown` (5).
 
-The pandoc-citeproc source code and all documentation may be downloaded
-from <http://github.com/jgm/pandoc-citeproc/>.
+The scholdoc-citeproc source code and all documentation may be downloaded
+from <http://github.com/timtylin/scholdoc-citeproc/>.

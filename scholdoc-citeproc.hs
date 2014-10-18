@@ -31,12 +31,12 @@ main :: IO ()
 main = do
   argv <- getArgs
   let (flags, args, errs) = getOpt Permute options argv
-  let header = "Usage: pandoc-citeproc [options] [file..]"
+  let header = "Usage: scholdoc-citeproc [options] [file..]"
   unless (null errs) $ do
     hPutStrLn stderr $ usageInfo (unlines $ errs ++ [header]) options
     exitWith $ ExitFailure 1
   when (Version `elem` flags) $ do
-    putStrLn $ "pandoc-citeproc " ++ showVersion version
+    putStrLn $ "scholdoc-citeproc " ++ showVersion version
     exitWith ExitSuccess
   when (Help `elem` flags) $ do
     putStrLn $ usageInfo header options

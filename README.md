@@ -36,7 +36,7 @@ The version number of this package is kept in sync with [pandoc-citeproc].
 [pandoc-types]: https://github.com/jgm/pandoc-types
 [pandoc-citeproc]: https://github.com/jgm/pandoc-citeproc
 [travis_stat]: https://travis-ci.org/timtylin/scholdoc-citeproc
-[scholarly-devel-travisimage]: https://travis-ci.org/timtylin/scholdoc-citeproc.svg?branch=scholarly-devel
-[scholarly-travisimage]: https://travis-ci.org/timtylin/scholdoc-citeproc.svg?branch=scholarly
-[citeproc-readme-blob]: https://github.com/timtylin/scholdoc-citeproc/blob/scholarly-devel/README-pandoc-citeproc
+[scholarly-devel-travisimage]: https://travis-ci.org/timtylin/scholdoc-citeproc.svg?branch=master
+[scholarly-travisimage]: https://travis-ci.org/timtylin/scholdoc-citeproc.svg?branch=stable
+[citeproc-readme-blob]: https://github.com/timtylin/scholdoc-citeproc/blob/master/README-pandoc-citeproc
 [csl]: http://citationstyles.org

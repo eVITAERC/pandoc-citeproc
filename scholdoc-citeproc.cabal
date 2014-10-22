@@ -19,7 +19,7 @@ license:            BSD3
 license-file:       LICENSE
 author:             Tim T.Y. Lin <timtylin@gmail.com>
 maintainer:         Tim T.Y. Lin <timtylin@gmail.com>
-homepage:           https://github.com/timtylin/scholdoc-citeproc
+homepage:           http://scholdoc.scholarlymarkdown.com
 bug-reports:        https://github.com/timtylin/scholdoc-citeproc/issues
 build-type:         Custom
 data-files:         chicago-author-date.csl
